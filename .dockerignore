@@ -1,0 +1,15 @@
+.git
+.gitignore
+node_modules
+.env
+.env.*
+!.env.example
+var
+service-logs
+verification
+*.log
+*.zip
+*.bak
+*.tgz
+.DS_Store
+Thumbs.db

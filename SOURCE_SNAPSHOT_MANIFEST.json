@@ -1,0 +1,712 @@
+{
+  "source": "finger/biometric-service",
+  "sourceVersion": "0.18.0",
+  "extractedOn": "2026-11-08",
+  "kind": "source-copy-only",
+  "files": [
+    {
+      "path": "src/index.js",
+      "sha256": "C8D8CDCDF11C32752ED7295F9DA964DCFCB1678678802D6ED8126933F7D190BD"
+    },
+    {
+      "path": "src/application/automatic-finalizing-punch-store.js",
+      "sha256": "4F4B08357767F6D3B47D9033C722DE4D7FA4898ED76811D4FB85292473D95E4B"
+    },
+    {
+      "path": "src/application/final-events-read-service.js",
+      "sha256": "EFDF76EAB5C078867AB5DCA9F193B996B46434623CF0B512AD04EFF2E094DC2B"
+    },
+    {
+      "path": "src/application/finalization-service.js",
+      "sha256": "C181F2DEB2A6DB5F6A5A449548243744D8F666A283D66387B2E2818E87A11050"
+    },
+    {
+      "path": "src/application/historical-final-events-replay-service.js",
+      "sha256": "17BBF1447EAD56ABB69D5C37FD19F0CA7855D17CB6823D054D0A9258B302B682"
+    },
+    {
+      "path": "src/application/person-directory-read-service.js",
+      "sha256": "AA6A4779062ED0B13E3E121D0848481483002C124BE0E336619CB2163FB57293"
+    },
+    {
+      "path": "src/application/receive-punch-batch.js",
+      "sha256": "3A30818D93F7846AEDD0001DFC4B7A1DA77EB2A1C519634BB043186C2818F5E6"
+    },
+    {
+      "path": "src/application/replay-durable-ingest.js",
+      "sha256": "9759403B881A7E49FC41EA6D92F497409B461D9229A42E1A14D77744F46A642B"
+    },
+    {
+      "path": "src/application/standalone-admin-service.js",
+      "sha256": "209D403BD0B15F7185A7221E6F5C88B750AE145F480D86CCB94AE4E050F8A32A"
+    },
+    {
+      "path": "src/application/standalone-management-service.js",
+      "sha256": "AAA318C54B63D11BA55D0F78C71715AEE99B0A856FEB82A736FCDA7E7D844661"
+    },
+    {
+      "path": "src/application/start-automatic-finalization-retry-loop.js",
+      "sha256": "9545A9AAEAE15D2997E5E642F9C9EC6D36AB61DF14ED5B8469991323F2287805"
+    },
+    {
+      "path": "src/application/start-durable-ingest-retry-loop.js",
+      "sha256": "B65B0BF7DA505E69A0FBB9B114C1F417E765D3BF8968EC0DBE17C7AF52A0D331"
+    },
+    {
+      "path": "src/application/web-bridge-push-service.js",
+      "sha256": "DD6383262BF2D72E977C2321DE67DA26D1A111DCC51A8A28FF7EEDB8283E1B2C"
+    },
+    {
+      "path": "src/cli/finalize-punch.js",
+      "sha256": "AD21C6EFCF3538975337955B770AAE1A51FE7BC9F12B7051E0EFE3591BCE5557"
+    },
+    {
+      "path": "src/cli/simulate-final-events-consumer.js",
+      "sha256": "38BFB99905CA7F64E78ACD2E7D162A993AA5D36E31E0140200FAB35C0E41215A"
+    },
+    {
+      "path": "src/config/env.js",
+      "sha256": "E576FD416C1A7E1F3E0A665858E701293666A56291290CCE1C1807546A722310"
+    },
+    {
+      "path": "src/domain/device-identity.js",
+      "sha256": "46B1381D4716F2DBC129B3BD25CFCC8A0BF4E347E1243A38A6B21CCB549FEB34"
+    },
+    {
+      "path": "src/domain/device-policy.js",
+      "sha256": "FFC6809E65B7CDCC74E46957E5F448E079533C63DAECC527113FED5D863274B9"
+    },
+    {
+      "path": "src/domain/finalization.js",
+      "sha256": "CC6CB64570D41E10EF06C19159D7B8A37D61A3D5D14E614EBDC3094B8793B446"
+    },
+    {
+      "path": "src/domain/historical-replay.js",
+      "sha256": "B40A942986DD58724B96DC60518A5269BE1304472DCC8DCA8466C35088883704"
+    },
+    {
+      "path": "src/domain/ingest-event.js",
+      "sha256": "5646127AB84BCC15EA8A12FDD10E34EFA17ED71A0C545067384EC3FAFABB7E23"
+    },
+    {
+      "path": "src/domain/punch.js",
+      "sha256": "C7EA0A7FBD18A6805E8D5D1E523C8AFAF6C56A14441BD0818431FF6E9AEF6D80"
+    },
+    {
+      "path": "src/domain/storage-identity.js",
+      "sha256": "C52AECC39A7B7DEA36F71E99B5D754E24E69FF035FA5926C3F808C387FE3CEFB"
+    },
+    {
+      "path": "src/domain/timezone.js",
+      "sha256": "3414AF1D07CC34A80BCF434A012CBA1CC5450227B6A61779D35FF11FD33C9627"
+    },
+    {
+      "path": "src/infrastructure/admin/server.js",
+      "sha256": "21068240580D99D493F18F3228A4FB2D2458C9C7C382B961BCFD6D50A4F421F1"
+    },
+    {
+      "path": "src/infrastructure/admin/public/app.js",
+      "sha256": "0905A2280B743029B3EE15D3328E88EE9D8114E20543127E0A783317B9E30389"
+    },
+    {
+      "path": "src/infrastructure/admin/public/index.html",
+      "sha256": "1276002B47F8A8A190676FA4DA780A8C79986182C46AA6EA5C7EFDC741B8AD0F"
+    },
+    {
+      "path": "src/infrastructure/admin/public/styles.css",
+      "sha256": "17E405CF0CBE2D3EEBE9A324076E85B5A09B4C11E8AA261C04A88DAF097BBC2C"
+    },
+    {
+      "path": "src/infrastructure/database/mysql-pool.js",
+      "sha256": "0006BE213B4EF9E02FC11466F3EA513828BABBD29EC7E77C28B71DCB983E51B6"
+    },
+    {
+      "path": "src/infrastructure/database/schema-check.js",
+      "sha256": "2EE6733F260098E2A121E96F0B262C55AC40BFBCEB48256B833E757CB6646290"
+    },
+    {
+      "path": "src/infrastructure/http/http-utils.js",
+      "sha256": "F209889384DD47B55EF648E77C71DA5470E77EED93094937E72753E2EBE2A145"
+    },
+    {
+      "path": "src/infrastructure/http/server.js",
+      "sha256": "0161BB388655668BC3215ECFE81745060AA3848B389280102905081EBE4DE12C"
+    },
+    {
+      "path": "src/infrastructure/integration/final-events-api-server.js",
+      "sha256": "88691C45BD2CF87EF523B2282B266891488079B107769D65FDBE3BA31A35C4D7"
+    },
+    {
+      "path": "src/infrastructure/logging/file-diagnostic-log.js",
+      "sha256": "E633A7410DE05110E0FBC31D7D6EECC7938DAA5734169910E0F2FB423C8C31EE"
+    },
+    {
+      "path": "src/infrastructure/storage/biometric-table-names.js",
+      "sha256": "C03D55602F36F1FF10C31E763FAF7F40A32281058BFBE52494F57F9F18CEA8E0"
+    },
+    {
+      "path": "src/infrastructure/storage/env-device-registry.js",
+      "sha256": "A58C395BF298F5915B597861950E275FA861BC504D083E6EC77B9A8D2D515C47"
+    },
+    {
+      "path": "src/infrastructure/storage/file-ingest-store.js",
+      "sha256": "4F5A0557A1769377661082EC052FA3FACFA34AA3EB5C5EEA41EB47AEDF6D6DA9"
+    },
+    {
+      "path": "src/infrastructure/storage/file-punch-store.js",
+      "sha256": "882227F35DF2A1FAF121F252EB02341CD57AE22F322FF9FBC3E5E269E4765BC0"
+    },
+    {
+      "path": "src/infrastructure/storage/tidb-admin-read-store.js",
+      "sha256": "53F324437FD24C1D8117F166D7545FEFB23B2F73F9503AD219050367AC42A62C"
+    },
+    {
+      "path": "src/infrastructure/storage/tidb-audit-store.js",
+      "sha256": "7E595929B370F7C6231EA53C8CC36C59ADE8E11E2519D56F2D47B4D2155F0268"
+    },
+    {
+      "path": "src/infrastructure/storage/tidb-device-store.js",
+      "sha256": "62F3320A058BB763490642EAE02C1D033C751F0C0746861CA11C08ECEB54BE22"
+    },
+    {
+      "path": "src/infrastructure/storage/tidb-final-events-read-store.js",
+      "sha256": "29DFBD26245954C6D6DF6DAB5218FEAE4C89A34137448CD13DC7EA2EBE65FD40"
+    },
+    {
+      "path": "src/infrastructure/storage/tidb-finalization-store.js",
+      "sha256": "1EF9D8FF988746CF9395EA1AB64E112A7DD0B4E53FFD224C68D04045586A3CD7"
+    },
+    {
+      "path": "src/infrastructure/storage/tidb-historical-replay-store.js",
+      "sha256": "942F0FAD2EEAF47811A56F7C23DFD2253337C30737551EE09E9E9CFF8AB66D79"
+    },
+    {
+      "path": "src/infrastructure/storage/tidb-ingest-store.js",
+      "sha256": "9B777795D59483963D65DB2FA2D5B1DC5F0F1176CAF222F2BE54060DE553BF0B"
+    },
+    {
+      "path": "src/infrastructure/storage/tidb-people-store.js",
+      "sha256": "4ED867BE83C50602F653544B0C0B16054C8FF9C42037A9E78AA4A5F3D4234F10"
+    },
+    {
+      "path": "src/infrastructure/storage/tidb-person-device-user-store.js",
+      "sha256": "8E3C198980CC9B0DAAE584BDC176A0189B7ED2984E0AF329199DD2A0CA612150"
+    },
+    {
+      "path": "src/infrastructure/storage/tidb-person-directory-read-store.js",
+      "sha256": "A38AAED0ECA852061505A61AF9903DFC3C591385553043F5FF3C1DE288B02B37"
+    },
+    {
+      "path": "src/infrastructure/storage/tidb-punch-store.js",
+      "sha256": "97829A836232D7FFE602146222400B3FC0C31FD61391919D14601C623A949F7D"
+    },
+    {
+      "path": "src/infrastructure/vendors/vendor-adapter-registry.js",
+      "sha256": "2CAA8CAD32BC2A486687294C096DACD972FE670006EA36F955562D687BBB7C2A"
+    },
+    {
+      "path": "src/infrastructure/vendors/zkteco/adms-parser.js",
+      "sha256": "C5D80D83C01DCBD9B330B5299D7756C891504FA9D8AF810328B0DBAE7A7E499E"
+    },
+    {
+      "path": "src/infrastructure/vendors/zkteco/adms-response.js",
+      "sha256": "19D523EABD4898305C8A125DC01E768D38E80D9B391861D4914E07D5E64C9C7F"
+    },
+    {
+      "path": "src/infrastructure/vendors/zkteco/attlog-normalization.js",
+      "sha256": "B9E81EE8F0498BAA7D192EB2126F400C525C1EA277AEB1E150447FB65964B81D"
+    },
+    {
+      "path": "src/infrastructure/vendors/zkteco/attlog-observation.js",
+      "sha256": "BD0FDD6B45E0D97551B1F8E80D2761AAC20540F4144F647965D8CDBAE4A75CDC"
+    },
+    {
+      "path": "src/infrastructure/vendors/zkteco/device-options.js",
+      "sha256": "D50DDEDC250C22A602882224AEA96B95690178BAE25D763DD32A6A39201CFF69"
+    },
+    {
+      "path": "src/infrastructure/vendors/zkteco/http-adapter.js",
+      "sha256": "575F28FDFEE92C8B7B8ADC041DF7B5C6B369051A1957E90FEB85F410851943BC"
+    },
+    {
+      "path": "src/infrastructure/vendors/zkteco/operlog-observer.js",
+      "sha256": "46A069237590B007D15DC7544BCB554FEACF4A2B49493C9C986A53F0C11D1E89"
+    },
+    {
+      "path": "src/ports/admin-read-store.js",
+      "sha256": "E6B4CD71B64EFF732458BC79B385D386A0FBBF24DF7BEE81966D40714D7A7524"
+    },
+    {
+      "path": "src/ports/audit-store.js",
+      "sha256": "B2CEB4402AA271601E1BB358AF69032334BF40A9F5B7BD8924A31E6FDC6BEDDF"
+    },
+    {
+      "path": "src/ports/device-registry.js",
+      "sha256": "E767867CBC101C787D7802D9DBFC2205F402FBEBF1B51058DCB65586C1D2D6CD"
+    },
+    {
+      "path": "src/ports/diagnostic-log.js",
+      "sha256": "340BFAF21E72FE26F7A0E845683EB98E3615B208A4782CC782C846AE1D7107CB"
+    },
+    {
+      "path": "src/ports/final-events-read-store.js",
+      "sha256": "E85DE06C312B4F4C569238B6B9C0182AD3AF64821859AC5BC4D61E72175D4AF0"
+    },
+    {
+      "path": "src/ports/finalization-store.js",
+      "sha256": "8E57DB28C5678B3BD465D1C5A8BB426D0F1DC115EEA42D9CDAC954CF4B068453"
+    },
+    {
+      "path": "src/ports/historical-replay-store.js",
+      "sha256": "EB859A37FEABD111E4053137E6D602F2F7B88D41FE67C522F9AF0D2884F87E08"
+    },
+    {
+      "path": "src/ports/ingest-store.js",
+      "sha256": "AB45A2705E4AFF0E352458BD21ECD6D4BE481A51C7A3719A3CD189F748B3D5AF"
+    },
+    {
+      "path": "src/ports/people-store.js",
+      "sha256": "7DC4522348E2FA16252256800FC18D16D93EE7ACBC52D7A3C1D9F9160DF35666"
+    },
+    {
+      "path": "src/ports/person-device-user-store.js",
+      "sha256": "354BA8EA7E347FC824305AD204E96A6A74021F0F3ADDD628F4CA06DECD3D1888"
+    },
+    {
+      "path": "src/ports/person-directory-read-store.js",
+      "sha256": "41E50342032E716D17056213F955060B76A6033ECCAD5195C4D81E9525923DA9"
+    },
+    {
+      "path": "src/ports/punch-store.js",
+      "sha256": "ECAB9E8D0230CDEA43AF8A765EE7BCDFBCA9BB8930B17652369BC34F3C25744E"
+    },
+    {
+      "path": "tests/admin-http-server.test.js",
+      "sha256": "6EB2CA73054A6DE49DC40B183EAF501C8FFAF266CF3989DFDFDF12E2A743876E"
+    },
+    {
+      "path": "tests/admin-ui-localization.test.js",
+      "sha256": "508F04DC2A8D77DBC70D55F06EC9B1553667BE9A62A8DA4E20C1C24E9BB702CB"
+    },
+    {
+      "path": "tests/adms-parser.test.js",
+      "sha256": "FC96350FDF72249A776DF10231956F4871A29AEF50A324C995C88B91D48F68DC"
+    },
+    {
+      "path": "tests/architecture-boundaries.test.js",
+      "sha256": "2E13FC15634A92B59F4FF363E828AEDE6C819BE9DCA264CE511DD1D73A27D6EE"
+    },
+    {
+      "path": "tests/automatic-finalization-retry-loop.test.js",
+      "sha256": "CAE8912352A7276C90570AB51BBC1EE5E2862993CFBDB2768388B3E918C70EE6"
+    },
+    {
+      "path": "tests/automatic-finalizing-punch-store.test.js",
+      "sha256": "F23D4C76259A66423726AA54BAF25A44F67ED7BC925E6F2DB11B370FC4447B70"
+    },
+    {
+      "path": "tests/cli-package-scripts.test.js",
+      "sha256": "C85E94A4F887236659268FCF93B58933DC7BEDBD1C3F260BFC5A6E9DBCBBB4DC"
+    },
+    {
+      "path": "tests/config-database.test.js",
+      "sha256": "363A94F54D8F1515D98497403EFCC3006DFD83434AF0F032DCABC413E717D0F1"
+    },
+    {
+      "path": "tests/database-schema-check.test.js",
+      "sha256": "40766A43F9B7282C8148CF4678C575C491EF97EA77457A83CECAD168E30A1229"
+    },
+    {
+      "path": "tests/device-policy.test.js",
+      "sha256": "018F05302C25AAB8460ED23F54733C7E718CE430784A3FC644D4DC5659DD0009"
+    },
+    {
+      "path": "tests/device-registry.test.js",
+      "sha256": "00B739FB37ED40EFEE85237B906B7AF0AD6B22593EA2DD54ECA46063310FA87A"
+    },
+    {
+      "path": "tests/diagnostic-log.test.js",
+      "sha256": "B666289E43FE3664E810A0461F89BB5F1D1A50D5F9FC2951AB530380984649FB"
+    },
+    {
+      "path": "tests/file-punch-store.test.js",
+      "sha256": "D17AEAF599AAAE4EDAD71B47BA9546B711E21A1359E732812192C5C15AE864A7"
+    },
+    {
+      "path": "tests/final-events-api-server.test.js",
+      "sha256": "0ED699C9C9B72E8BF2EF118C56D28D7DF944B9DA99204E39B1530A07BC41E70F"
+    },
+    {
+      "path": "tests/final-events-read-service.test.js",
+      "sha256": "BB587365712513AD8F67225FDACA3DEBD49E1475F3FE412DA3BC990D2313B0EA"
+    },
+    {
+      "path": "tests/finalization-service.test.js",
+      "sha256": "2A61E9BE07E231D594356D13D7B7C994CF2907AC669A5C15C7E00398210DCB17"
+    },
+    {
+      "path": "tests/historical-final-events-replay-service.test.js",
+      "sha256": "E9DB854BE8C318ED348FB98D6DE95C73AA010C79D1DAE687D9043E6FFF55C166"
+    },
+    {
+      "path": "tests/http-server.test.js",
+      "sha256": "146F6064B67544FE659BCE0498613CC99421783B9E87EC803D6484DD56DA9A5B"
+    },
+    {
+      "path": "tests/person-directory-read-service.test.js",
+      "sha256": "867564E134F0D252A56A133265447E7830DDC9824837DAC213B102BF66AEF92E"
+    },
+    {
+      "path": "tests/receive-punch-batch.test.js",
+      "sha256": "3A8E0E7571510994256EC22F54D2082B2D27634F4D187D3D09E0377B5FEEB678"
+    },
+    {
+      "path": "tests/replay-durable-ingest.test.js",
+      "sha256": "EA8BE0FB06B525B2A4ACADB8B2D9EBF10F1E33C6E6C15725781C641DCE3CA186"
+    },
+    {
+      "path": "tests/retry-loop.test.js",
+      "sha256": "52B7ED02471E55CBB89A4DC32CF5CDE330FCC6FB4067308F1D189CFE37460272"
+    },
+    {
+      "path": "tests/standalone-admin-service.test.js",
+      "sha256": "3AB70D84A46617DB69A114822877C433B8C9F3C833D0E7A91D029DB31C849CE4"
+    },
+    {
+      "path": "tests/standalone-management-service.test.js",
+      "sha256": "FB6513A5ABF26F40448664E21ED10F794A8B81E80E558E9DAD44483568692143"
+    },
+    {
+      "path": "tests/storage-identity.test.js",
+      "sha256": "EF379C7EB6C4ABAED0CDCC89B1CBA7AFF1A86DABD19AF487A9E7A73CD15892F2"
+    },
+    {
+      "path": "tests/tidb-admin-read-store.test.js",
+      "sha256": "FBB1486308E8CE0D6FD18FDFD17DB52FC9F8E293E1EB9B274D13FE0811C3FD70"
+    },
+    {
+      "path": "tests/tidb-audit-store.test.js",
+      "sha256": "7FF4CC09A3034271DBB52185B960B0C54ACC08B3872C9040F6444BA3C8C17CA9"
+    },
+    {
+      "path": "tests/tidb-device-store.test.js",
+      "sha256": "95966E729F9B64173038E4CBEBA1EFCB71566C5D38E7BFF6E85E1BF1CF371511"
+    },
+    {
+      "path": "tests/tidb-final-events-read-store.test.js",
+      "sha256": "1A25E223B3A5230FF945178A5759EABECAAF4B991EB1D6CF6FC0AD5C12D70485"
+    },
+    {
+      "path": "tests/tidb-finalization-store.test.js",
+      "sha256": "2956CD43103D87EA6D6890472028942FCDE136FA29B96FEB955D4197CBCB0281"
+    },
+    {
+      "path": "tests/tidb-historical-replay-store.test.js",
+      "sha256": "3D5570129EFEBB810E7EDFF1C307131E95EA1CD4A8032175E032B55E02A7BA41"
+    },
+    {
+      "path": "tests/tidb-ingest-store.test.js",
+      "sha256": "594D5BFD369144F6332E4A697523CB76BE1993C38AB027DB4259822A8C0DC097"
+    },
+    {
+      "path": "tests/tidb-people-store.test.js",
+      "sha256": "5CB52C256D5C026E9EEEE818335DF0B4FE6960B9F41277F7720458BEC68A4119"
+    },
+    {
+      "path": "tests/tidb-person-device-user-store.test.js",
+      "sha256": "93DD9DBFF7B46C124787C5308D6AE539B16F41E7E33DF8E4EC9334EBA54AA8CB"
+    },
+    {
+      "path": "tests/tidb-person-directory-read-store.test.js",
+      "sha256": "F07FD08B66EEB4228E49ABBCC7B83C83B90E7C4FDCDB0E108B5D2885C69C17DC"
+    },
+    {
+      "path": "tests/tidb-punch-store.test.js",
+      "sha256": "B016CEF76C45A83F8C9994F0DFDF741CDD14A0B72B529426F5B651CE7A808CC6"
+    },
+    {
+      "path": "tests/timezone.test.js",
+      "sha256": "0471FB698E575F8C7EA647A1A17E3E6DE7431E750301D46CDA62D25FF2016D0F"
+    },
+    {
+      "path": "tests/vendor-adapter-registry.test.js",
+      "sha256": "94E16C245DD7FB04949F47E8C2797FF1AF14EBF30CB897791B484338B6E5F97E"
+    },
+    {
+      "path": "tests/web-bridge-push-service.test.js",
+      "sha256": "024CA7B6507F98C8402DE5A320F17C4870CA208C957F0F7DB401EF1E7B1B25C5"
+    },
+    {
+      "path": "tests/zkteco-attlog-normalization.test.js",
+      "sha256": "460185202F70CF66A85CCB67A54E1A1B89AFBD450B2C52C3223F0F23BEF12B4E"
+    },
+    {
+      "path": "docs/ACK_POLICY.md",
+      "sha256": "752183735D42F23463CE824AC39B314AD3422A60CEB25C16FF4897C8E42F3E7B"
+    },
+    {
+      "path": "docs/ARCHITECTURE.md",
+      "sha256": "3E1AEF7E311D590BB9559A8885A05EFDC81D48C5820DBB9D78A0AEFF4B72380F"
+    },
+    {
+      "path": "docs/BIOMETRIC_INTEGRATION_STATUS_2026-09-07.md",
+      "sha256": "6B457008C4F3EC8CC3B83AB8F8CECE7ED9C5237D76198CB91B7FAA62A41FA004"
+    },
+    {
+      "path": "docs/DOCUMENTATION_UPDATE_2026-09-07.md",
+      "sha256": "2D1AD9C5A0346969A6C3123F77F5F9554C641D09BC35A07BF343555ACAC049EB"
+    },
+    {
+      "path": "docs/FINAL_EVENTS_API_V1.md",
+      "sha256": "A68C903E835A321FFA699F9D26C5C4FD154DC20FB8896E5249A451D3719350A2"
+    },
+    {
+      "path": "docs/MULTI_DEVICE_MULTI_VENDOR_POLICY.md",
+      "sha256": "D185DCAA70600B4EBBB042334D9CDA9230D26CABB176982AD113CEC19249CB2B"
+    },
+    {
+      "path": "docs/OPERLOG_POLICY.md",
+      "sha256": "366470002E3A554072AB13AE36DA51C03FC09A4102104E3AFE00898675F3D1B5"
+    },
+    {
+      "path": "docs/PERSON_DIRECTORY_API_V1.md",
+      "sha256": "FA00E8AEA9A4206EA3B7B26AF363B52A4D26E06A8B2399B9FA499E884D619AE5"
+    },
+    {
+      "path": "docs/PHASE2_ADMS_OBSERVER_STATUS.md",
+      "sha256": "1292F2BDD3903D23425DB8F4AE829AC537C7753CAB120E3DC47F86AD525E18D7"
+    },
+    {
+      "path": "docs/README.md",
+      "sha256": "F15931CA9570FD01DB56A9D6DEDB98D17D44304F0379CB1DC028C90148588CC2"
+    },
+    {
+      "path": "docs/REAL_DEVICE_OPTIONS_CAPTURE.md",
+      "sha256": "FD59C2888758CB2C26EA6BA15F264EEB65FB9A6C9B16C7B090C8DD3D892C0916"
+    },
+    {
+      "path": "docs/REAL_DEVICE_TEST_GATE.md",
+      "sha256": "0A308C61C496B4DDB159391D14AEA3AFAB3FAF308C2CD74DC64FCC189504C2CD"
+    },
+    {
+      "path": "docs/UPGRADE_V0.10.0_TO_V0.11.0.md",
+      "sha256": "A7CD7DD45649E5642EAFAF5FBD49EAAD9D8C7E54E611C0DFD6F27FE11D2F6FA7"
+    },
+    {
+      "path": "docs/UPGRADE_V0.11.0_TO_V0.11.1.md",
+      "sha256": "640C7BCD3FC95858FD36262A29E63C850B4467ED3816447467E3CF46D8E1B739"
+    },
+    {
+      "path": "docs/UPGRADE_V0.11.1_TO_V0.12.0.md",
+      "sha256": "FE33F2ACA44753DBA08F52E8FECA65B2F5819478FB8DEC514D32F3DE94B4F9DE"
+    },
+    {
+      "path": "docs/UPGRADE_V0.12.0_TO_V0.12.1.md",
+      "sha256": "686ACBA9AA8345FD7F8A11C02501696C73F9DAA84E6E402F449B5E6D6C0EF4B9"
+    },
+    {
+      "path": "docs/UPGRADE_V0.12.1_TO_V0.12.2.md",
+      "sha256": "9CD4ED18813097C977F6BDEFE5F62E9FEC4581EC284CD856B2B4F82767626138"
+    },
+    {
+      "path": "docs/UPGRADE_V0.12.2_TO_V0.13.0.md",
+      "sha256": "FE02C09A3B7B28E7ACC95272F7F4C6C27187EA009E6AC460A05A880D1AE2E15E"
+    },
+    {
+      "path": "docs/UPGRADE_V0.13.1_TO_V0.14.0.md",
+      "sha256": "68EEBB54919192FECA87E1D5FD9616D67C1822C16F46ECE88CAF55759DDFF48E"
+    },
+    {
+      "path": "docs/UPGRADE_V0.14.0_TO_V0.15.0.md",
+      "sha256": "9543D2C6A3DEB02786FE14FD37B2A13B5F49F7A8B771DDA2BDB944A9436AFE41"
+    },
+    {
+      "path": "docs/UPGRADE_V0.15.0_TO_V0.15.1.md",
+      "sha256": "40941727000008B2B7AD4620FEB243A3D04EF042E6AA30EDC76CDD4F051C8B0D"
+    },
+    {
+      "path": "docs/UPGRADE_V0.15.1_TO_V0.16.0.md",
+      "sha256": "F9562DB687AC14B615C1DE2EABD9DAEF41A4F11A9102676DA3BBE0C1A2646A4A"
+    },
+    {
+      "path": "docs/UPGRADE_V0.16.0_TO_V0.17.0.md",
+      "sha256": "E2E93FBB523A631DD3246BD9BDCEB427C43A5215E68B2F97B522028F02C08D5F"
+    },
+    {
+      "path": "docs/UPGRADE_V0.17.0_TO_V0.17.1.md",
+      "sha256": "37AE464189F5DFBB2DCFBC1B50F526137CA652C5395C35DC176AC7ECD678A233"
+    },
+    {
+      "path": "docs/UPGRADE_V0.17.1_TO_V0.18.0.md",
+      "sha256": "15360404E7570D99002A1BF8AC60179FE5A926572B2C2D60E4DDEBBE84672185"
+    },
+    {
+      "path": "docs/UPGRADE_V0.4_TO_V0.5.md",
+      "sha256": "16D98BE9F2B0502CF29A2E47B135D4204BCBC6B2C6B91FDF37ED25202278F1F3"
+    },
+    {
+      "path": "docs/UPGRADE_V0.5_TO_V0.6.md",
+      "sha256": "906E4BAD3626C9EF47E729DA82E3B185500921C6958028279FF18CB0C0B3BE27"
+    },
+    {
+      "path": "docs/UPGRADE_V0.6_TO_V0.7.md",
+      "sha256": "8B3A1732383FD388165AA6015F11EA879B04DA62F3E5E900EC50D931B98B96E2"
+    },
+    {
+      "path": "docs/UPGRADE_V0.7_TO_V0.8.md",
+      "sha256": "C43ABBADEC578DEE6E0653120068E05FA823077421831D30AA04FC4B6D9F6BC7"
+    },
+    {
+      "path": "docs/UPGRADE_V0.8_TO_V0.9.md",
+      "sha256": "2E7F0E3EF11598F7B5534E27721059874065936BC5EB5E03FE9B50F9595E7EB3"
+    },
+    {
+      "path": "docs/UPGRADE_V0.9.0_TO_V0.9.1.md",
+      "sha256": "2B5B220ABE463BC4726102DDEFE041D68668C358D9E87B8ECB4167A539335A8A"
+    },
+    {
+      "path": "docs/UPGRADE_V0.9.1_TO_V0.9.2.md",
+      "sha256": "1A18470533BFA7DB926F1A50C2C6AF3FED69B4ABD3E658920042D63D79FEA0A2"
+    },
+    {
+      "path": "docs/UPGRADE_V0.9.2_TO_V0.9.3.md",
+      "sha256": "C3890AC153B9304050D935057D96A1BBFD836DB84911DD08E800D31B5E2F60B4"
+    },
+    {
+      "path": "docs/UPGRADE_V0.9.3_TO_V0.9.4.md",
+      "sha256": "71AB39F9E73EDFD42CCDD773FBBE98A29DDA55324BF69B307436071653979F3E"
+    },
+    {
+      "path": "docs/UPGRADE_V0.9.4_TO_V0.10.0.md",
+      "sha256": "68A9E2A1A75F2F525B72E4685951565B7AC66D4D67DF305CD941BD150A5F359C"
+    },
+    {
+      "path": "docs/biometric/00_BIOMETRIC_MASTER_PLAN.md",
+      "sha256": "EC5B25F08838DAC64C0365344F83D17B26708D77F26BF4FDCC078CF765C0A988"
+    },
+    {
+      "path": "docs/biometric/01_CURRENT_STATUS.md",
+      "sha256": "A683AD53A06BDE81B06CA5BEE1CD9940EFE71D05148D4385C9CFB34E8DA832CF"
+    },
+    {
+      "path": "docs/biometric/02_DECISION_LOG.md",
+      "sha256": "D490BE9C6C52E0591C7D52992AD81F570D3D17EBA3563E5E2FD178BD28E3253B"
+    },
+    {
+      "path": "docs/biometric/03_ISSUES_AND_FIXES.md",
+      "sha256": "FA2A4F5E4526141E2572D721A028CF0C312A30503BDC4D0979AFB98C087E72D4"
+    },
+    {
+      "path": "docs/biometric/04_EXECUTION_CHECKLIST.md",
+      "sha256": "EB995291078EA0F066E150AC73E3BA3B0E384A593704ED82911C76FC79B8FFF7"
+    },
+    {
+      "path": "docs/biometric/05_DATABASE_DESIGN_APPROVED.md",
+      "sha256": "9720DDCAEF0FF670E23C73179DAE550CF918D4E175384920D4CC790CEAB6C6A4"
+    },
+    {
+      "path": "docs/biometric/05_DATABASE_DESIGN_DRAFT.md",
+      "sha256": "75CE18CC07439A514F2C19F85D8C432FAF83BFDC95C46884B31CE2E232CC8902"
+    },
+    {
+      "path": "docs/biometric/06_DATABASE_EXECUTION_LOG.md",
+      "sha256": "069D28F9887A1A4B9104D6DFFD6B3986B41C2D0CAE989A59488BC89F9616F029"
+    },
+    {
+      "path": "docs/biometric/07_LEGACY_BIOMETRIC_CLEANUP_GATE.md",
+      "sha256": "474B80731CFF9D458A5A6F0D907F566A49580C6FA04B1B0636348E4A9CBA68B1"
+    },
+    {
+      "path": "docs/biometric/08_REAL_DEVICE_VALIDATION_2026-08-29.md",
+      "sha256": "A43001F903A4D13DC124565C21F7E7555D3C61C6488098D758BA493409FCE9E4"
+    },
+    {
+      "path": "docs/biometric/09_ATTLOG_FIELD_MAPPING.md",
+      "sha256": "E8D63B790B9A9018216DB3D763942681696229DE20FD5110B6DC751F02729158"
+    },
+    {
+      "path": "docs/biometric/10_DATABASE_INSPECTION_2026-08-29.md",
+      "sha256": "BAA1BC32CCE5C0124EAE9C0F2E476DA904978FC82CFB9AA7398DFA9FB6BD30BE"
+    },
+    {
+      "path": "docs/biometric/11_DATABASE_RECONCILIATION_PENDING.md",
+      "sha256": "1A385BEF5E0C30CFE9A3A2B168FB01691BA31CABE2C3208639DC69858EC866CE"
+    },
+    {
+      "path": "docs/biometric/12_OPERATIONS_RUNBOOK.md",
+      "sha256": "62B7AA85CBC5DB456856F46B579167AF64A5D254EC6C79B6C4920342E7B18944"
+    },
+    {
+      "path": "docs/biometric/13_DOCUMENTATION_CHANGELOG_2026-08-29.md",
+      "sha256": "37272D4AF62DCC206554B13556624A574C42FF9F56176CBA4B8C38F59BBA8ED7"
+    },
+    {
+      "path": "docs/biometric/14_DATABASE_REINSPECTION_2026-08-30.md",
+      "sha256": "3A7D2EF0573AF84AA9D74FCFD564C6E8BCD13EB5C78816C47B2EA2CF40D392FE"
+    },
+    {
+      "path": "docs/biometric/15_DATABASE_RUNTIME_INTEGRATION_2026-08-30.md",
+      "sha256": "42C55303B424357F555769768FD99F649471642CC3305E23041A457679457445"
+    },
+    {
+      "path": "docs/biometric/16_V0.9.2_RUNTIME_HARDENING_2026-08-31.md",
+      "sha256": "E14CE9B9B9512997EFD4D6BE480582C566E9A9D5D3B13C16790F2DBB3281EC13"
+    },
+    {
+      "path": "docs/biometric/18_V0.9.4_ACCEPT_EVENTS_FROM_UTC_FIX_2026-08-31.md",
+      "sha256": "BAC8CB2389207B4AA7694B480BD2E8BC11A22E319BF8094AA22C7CD16517151F"
+    },
+    {
+      "path": "docs/biometric/19_FINAL_CLOSURE_REPORT_2026-08-31.md",
+      "sha256": "84D4886354004E568420DA5EEC868913462C33F920879392BAFCA70A231C7EB1"
+    },
+    {
+      "path": "docs/biometric/20_STANDALONE_BIOMETRIC_SYSTEM_EXECUTION_PLAN_2026-08-31.md",
+      "sha256": "69911FB44E91195F6272A821095FC55527AFD14831EA5DAC2B48BBDBE2A83481"
+    },
+    {
+      "path": "docs/biometric/21_WINDOWS_SERVICE_WINSW_LOCAL_PC_2026-09-07.md",
+      "sha256": "7130CE82889154EF6A6C170AEF5271448CD62842AB2F51600E7A1DC5C05068DF"
+    },
+    {
+      "path": "docs/biometric/README.md",
+      "sha256": "650124FC0BCEFEF5F032B5D4E0608E5E78469CD51D096BAAE4E4A31005FE8DA9"
+    },
+    {
+      "path": "docs/biometric/SUPERSEDES_OLD_BIOMETRIC_DOCS.md",
+      "sha256": "9760EB629B14176102FBFE61E06F303BD9327CD57C456A23B392D39FA9C79065"
+    },
+    {
+      "path": "docs/biometric/scripts/Install-TolanBiometricService-v2.ps1",
+      "sha256": "40159E9ED8EBE16D5DDC37436BE73181A9F348D5A6D0CB07BD147E46E5AC3025"
+    },
+    {
+      "path": "database/ACTUAL_TABLES_REFERENCE_2026-08-30.md",
+      "sha256": "FCCCD6EBB8CBD283EB457810EB7263DF2B1354EC4013D330F3865F5A1AD245CE"
+    },
+    {
+      "path": "database/LEGACY_PROPOSED_SCHEMA_V1_NOT_APPLIED.sql",
+      "sha256": "457CCC50BEC5B379B89887D735BE795AE298B6D4928ABC00371766ACC54BF593"
+    },
+    {
+      "path": "database/PROPOSED_SCHEMA_V1_NOT_APPLIED.sql",
+      "sha256": "457CCC50BEC5B379B89887D735BE795AE298B6D4928ABC00371766ACC54BF593"
+    },
+    {
+      "path": "database/README.md",
+      "sha256": "2F24F52D63DD8090D81D670D759B9FD8CD459621712A09A92C9B76A82C24CD57"
+    },
+    {
+      "path": "package.json",
+      "sha256": "7E38F362D861DCF070F6B6AC23DDB7BAD473681323F9E6EBC949E44487B4A411"
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "3B8429B4792A7C712A996099A40C070284DD6DEBE9743BCB5665F00FD9AA0290"
+    },
+    {
+      "path": ".env.example",
+      "sha256": "CC1248D74C011683D7FE88A580ED54BE2689A0E50869A3F4FBD9FB7752CBD1D2"
+    }
+  ]
+}

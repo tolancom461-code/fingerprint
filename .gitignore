@@ -1,0 +1,23 @@
+# Dependencies and generated packages
+node_modules/
+*.tgz
+
+# Local credentials; the public configuration template is versioned
+.env
+.env.*
+!.env.example
+!.env.railway.staging.example
+
+# Actual device data, delivery cursors, diagnostics and local evidence
+var/
+service-logs/
+verification/
+*.log
+*.zip
+*.bak
+
+# Local editor and operating-system files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

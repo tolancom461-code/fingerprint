@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>إدارة البصمة</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-block">
+      <h1 data-i18n="app.title">إدارة البصمة</h1>
+      <p data-i18n="app.subtitle">واجهة بسيطة للحضور والربط</p>
+    </div>
+    <div class="top-actions">
+      <span id="connectionBadge" class="badge neutral" data-i18n="connection.connecting">جاري الاتصال…</span>
+      <button id="refreshButton" class="button secondary" type="button" data-i18n="actions.refresh">تحديث</button>
+      <button id="languageButton" class="button language" type="button" dir="auto" aria-label="Switch to English">English</button>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section id="notice" class="notice hidden" role="status" aria-live="polite"></section>
+
+    <nav class="tabs" data-i18n-aria="nav.aria" aria-label="أقسام النظام">
+      <button class="tab active" data-view="home" type="button" data-i18n="nav.home">الرئيسية</button>
+      <button class="tab" data-view="unmapped" type="button">
+        <span data-i18n="nav.unmapped">يحتاج ربط</span>
+        <span id="unmappedTabCount" class="count number">0</span>
+      </button>
+      <button class="tab" data-view="events" type="button" data-i18n="nav.events">الحركات</button>
+      <button class="tab" data-view="reports" type="button" data-i18n="nav.reports">التقارير</button>
+      <button class="tab" data-view="issues" type="button">
+        <span data-i18n="nav.issues">المراجعة</span>
+        <span id="issuesTabCount" class="count number">0</span>
+      </button>
+      <button class="tab" data-view="people" type="button" data-i18n="nav.people">الأشخاص</button>
+      <button class="tab" data-view="devices" type="button" data-i18n="nav.devices">الأجهزة</button>
+    </nav>
+
+    <section id="view-home" class="view active">
+      <div id="summaryCards" class="summary-grid skeleton-grid"></div>
+      <div class="two-column">
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2 data-i18n="home.attention.title">يحتاج انتباهك</h2>
+              <p data-i18n="home.attention.subtitle">نُظهر فقط الأشياء التي تتطلب إجراء.</p>
+            </div>
+          </div>
+          <div id="attentionList" class="stack"></div>
+        </section>
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2 data-i18n="home.events.title">آخر الحركات النهائية</h2>
+              <p data-i18n="home.events.subtitle">الحركات الجاهزة للاستخدام لاحقًا.</p>
+            </div>
+          </div>
+          <div id="homeEvents" class="stack"></div>
+        </section>
+      </div>
+    </section>
+
+    <section id="view-unmapped" class="view">
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2 data-i18n="unmapped.title">مستخدمون يحتاجون ربط</h2>
+            <p data-i18n="unmapped.subtitle">أدخل الاسم فقط عندما لا يستطيع النظام معرفة الشخص تلقائيًا.</p>
+          </div>
+        </div>
+        <form id="unmappedFilters" class="filter-bar">
+          <label class="filter-grow">
+            <span data-i18n="filters.search">بحث</span>
+            <input name="search" maxlength="100" autocomplete="off" data-i18n-placeholder="filters.searchPersonOrCodePlaceholder" placeholder="الاسم أو الرقم">
+          </label>
+          <label>
+            <span data-i18n="filters.device">الجهاز</span>
+            <select name="deviceId" data-device-select><option value="" data-i18n="filters.allDevices">كل الأجهزة</option></select>
+          </label>
+          <div class="filter-actions">
+            <button class="button primary" type="submit" data-i18n="filters.apply">تطبيق</button>
+            <button class="button ghost" type="button" data-reset-filters="unmapped" data-i18n="filters.clear">مسح</button>
+          </div>
+        </form>
+        <div id="unmappedList" class="stack"></div>
+        <div id="unmappedPagination" class="pagination"></div>
+      </section>
+    </section>
+
+    <section id="view-events" class="view">
+      <section class="panel">
+        <div class="panel-head panel-head-wrap">
+          <div>
+            <h2 data-i18n="events.title">الحركات النهائية</h2>
+            <p data-i18n="events.subtitle">سجل بسيط للحركات المعتمدة داخل نظام البصمة.</p>
+          </div>
+          <button id="exportEvents" class="button secondary" type="button" data-i18n="events.exportExcel">تصدير Excel</button>
+        </div>
+        <form id="eventsFilters" class="filter-bar">
+          <label class="filter-grow">
+            <span data-i18n="filters.person">الشخص</span>
+            <input name="search" maxlength="100" autocomplete="off" data-i18n-placeholder="filters.searchPersonOrCodePlaceholder" placeholder="الاسم أو الرقم">
+          </label>
+          <label>
+            <span data-i18n="filters.period">الفترة</span>
+            <select name="period" data-period-select="events">
+              <option value="last7" data-i18n="period.last7">آخر 7 أيام</option>
+              <option value="today" data-i18n="period.today">اليوم</option>
+              <option value="yesterday" data-i18n="period.yesterday">أمس</option>
+              <option value="month" data-i18n="period.month">هذا الشهر</option>
+              <option value="all" data-i18n="period.all">كل الفترات</option>
+              <option value="custom" data-i18n="period.custom">فترة مخصصة</option>
+            </select>
+          </label>
+          <label>
+            <span data-i18n="filters.eventType">نوع الحركة</span>
+            <select name="eventType">
+              <option value="" data-i18n="filters.allEvents">كل الحركات</option>
+              <option value="check_in" data-i18n="event.checkIn">حضور</option>
+              <option value="check_out" data-i18n="event.checkOut">انصراف</option>
+              <option value="break_out" data-i18n="event.breakOut">بداية استراحة</option>
+              <option value="break_in" data-i18n="event.breakIn">عودة من الاستراحة</option>
+              <option value="overtime_in" data-i18n="event.overtimeIn">بداية وقت إضافي</option>
+              <option value="overtime_out" data-i18n="event.overtimeOut">نهاية وقت إضافي</option>
+            </select>
+          </label>
+          <label>
+            <span data-i18n="filters.device">الجهاز</span>
+            <select name="deviceId" data-device-select><option value="" data-i18n="filters.allDevices">كل الأجهزة</option></select>
+          </label>
+          <details class="more-filters">
+            <summary data-i18n="filters.more">المزيد</summary>
+            <label>
+              <span data-i18n="filters.verification">طريقة التحقق</span>
+              <select name="verificationMethod">
+                <option value="" data-i18n="filters.allVerification">كل طرق التحقق</option>
+                <option value="fingerprint" data-i18n="verification.fingerprint">بصمة إصبع</option>
+                <option value="face" data-i18n="verification.face">وجه</option>
+                <option value="palm" data-i18n="verification.palm">كف</option>
+                <option value="card" data-i18n="verification.card">بطاقة</option>
+                <option value="password" data-i18n="verification.password">رمز تحقق</option>
+                <option value="unknown" data-i18n="verification.unknown">غير محدد</option>
+              </select>
+            </label>
+          </details>
+          <div class="custom-range hidden" data-custom-range="events">
+            <label><span data-i18n="filters.from">من</span><input name="from" type="date"></label>
+            <label><span data-i18n="filters.to">إلى</span><input name="to" type="date"></label>
+          </div>
+          <div class="filter-actions">
+            <button class="button primary" type="submit" data-i18n="filters.apply">تطبيق</button>
+            <button class="button ghost" type="button" data-reset-filters="events" data-i18n="filters.clear">مسح</button>
+          </div>
+        </form>
+        <div id="eventsFilterSummary" class="filter-summary"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th data-i18n="table.person">الشخص</th>
+                <th data-i18n="table.event">الحركة</th>
+                <th data-i18n="table.time">الوقت</th>
+                <th data-i18n="table.device">الجهاز</th>
+                <th data-i18n="table.verification">التحقق</th>
+                <th data-i18n="table.details">التفاصيل</th>
+              </tr>
+            </thead>
+            <tbody id="eventsTable"></tbody>
+          </table>
+        </div>
+        <div id="eventsPagination" class="pagination"></div>
+      </section>
+    </section>
+
+    <section id="view-reports" class="view">
+      <section class="panel reports-header">
+        <div class="panel-head">
+          <div>
+            <h2 data-i18n="reports.title">تقارير نظام البصمة</h2>
+            <p data-i18n="reports.subtitle">تقارير تشغيلية للبصمة فقط، دون تكرار تقارير الدوام والرواتب في البرنامج الرئيسي.</p>
+          </div>
+        </div>
+        <form id="reportsFilters" class="filter-bar compact-filters">
+          <label>
+            <span data-i18n="filters.period">الفترة</span>
+            <select name="period" data-period-select="reports">
+              <option value="last7" data-i18n="period.last7">آخر 7 أيام</option>
+              <option value="today" data-i18n="period.today">اليوم</option>
+              <option value="yesterday" data-i18n="period.yesterday">أمس</option>
+              <option value="month" data-i18n="period.month">هذا الشهر</option>
+              <option value="all" data-i18n="period.all">كل الفترات</option>
+              <option value="custom" data-i18n="period.custom">فترة مخصصة</option>
+            </select>
+          </label>
+          <div class="custom-range hidden" data-custom-range="reports">
+            <label><span data-i18n="filters.from">من</span><input name="from" type="date"></label>
+            <label><span data-i18n="filters.to">إلى</span><input name="to" type="date"></label>
+          </div>
+          <div class="filter-actions">
+            <button class="button primary" type="submit" data-i18n="reports.update">تحديث التقارير</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel report-section">
+        <div class="panel-head"><div><h2 data-i18n="reports.health.title">سلامة النظام</h2><p data-i18n="reports.health.subtitle">هل وصلت الحركات واكتملت داخل نظام البصمة؟</p></div></div>
+        <div id="reportHealth" class="summary-grid report-summary-grid"></div>
+        <p class="report-note" data-i18n="reports.health.note">الحركات المستلمة هنا هي الحركات القانونية بعد إزالة التكرار، وليست محاولات الإرسال الخام من الجهاز.</p>
+      </section>
+
+      <section class="panel report-section">
+        <div class="panel-head"><div><h2 data-i18n="reports.devices.title">الأجهزة والاتصال</h2><p data-i18n="reports.devices.subtitle">نشاط كل جهاز ومشكلاته التشغيلية خلال الفترة.</p></div></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th data-i18n="table.device">الجهاز</th>
+              <th data-i18n="devices.status">الحالة</th>
+              <th data-i18n="reports.devices.events">الحركات</th>
+              <th data-i18n="reports.devices.openIssues">مشاكل مفتوحة</th>
+              <th data-i18n="reports.devices.unmapped">غير مربوط</th>
+              <th data-i18n="reports.devices.lastSeen">آخر اتصال</th>
+            </tr></thead>
+            <tbody id="reportDevicesTable"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel report-section">
+        <div class="panel-head"><div><h2 data-i18n="reports.mapping.title">الربط والجاهزية</h2><p data-i18n="reports.mapping.subtitle">هل الأشخاص ومستخدمو الأجهزة مربوطون وجاهزون؟</p></div></div>
+        <div id="reportMapping" class="summary-grid report-summary-grid"></div>
+      </section>
+
+      <section class="panel report-section">
+        <div class="panel-head"><div><h2 data-i18n="reports.issues.title">المشكلات والمعالجة</h2><p data-i18n="reports.issues.subtitle">المشكلات التشغيلية التي ظهرت داخل نظام البصمة، المفتوحة والمحلولة.</p></div></div>
+        <div id="reportIssuesSummary" class="summary-grid report-summary-grid"></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th data-i18n="reports.issues.problem">المشكلة</th>
+              <th data-i18n="table.person">الشخص</th>
+              <th data-i18n="table.device">الجهاز</th>
+              <th data-i18n="people.status">الحالة</th>
+              <th data-i18n="reports.issues.lastSeen">آخر ظهور</th>
+            </tr></thead>
+            <tbody id="reportIssuesTable"></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+
+    <section id="view-issues" class="view">
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2 data-i18n="issues.title">المراجعة</h2>
+            <p data-i18n="issues.subtitle">الحالات التي تحتاج قرارًا أو إجراءً فقط.</p>
+          </div>
+        </div>
+        <form id="issuesFilters" class="filter-bar">
+          <label class="filter-grow"><span data-i18n="filters.search">بحث</span><input name="search" maxlength="100" autocomplete="off" data-i18n-placeholder="filters.searchPersonOrCodePlaceholder" placeholder="الاسم أو الرقم"></label>
+          <label><span data-i18n="people.status">الحالة</span><select name="status"><option value="open" data-i18n="issues.open">مفتوحة</option><option value="resolved" data-i18n="issues.resolved">محلولة</option><option value="" data-i18n="filters.allStatuses">كل الحالات</option></select></label>
+          <label><span data-i18n="filters.issueType">نوع المشكلة</span><select name="issueType"><option value="" data-i18n="filters.allIssueTypes">كل الأنواع</option><option value="unmapped_device_user" data-i18n="issue.unmapped">حركة لمستخدم غير مربوط</option><option value="mapping_conflict" data-i18n="issue.mappingConflict">تعارض في الربط</option><option value="unknown_event_type" data-i18n="issue.unknownEvent">نوع حركة غير معروف</option><option value="invalid_time" data-i18n="issue.invalidTime">وقت حركة غير صالح</option><option value="inactive_person" data-i18n="issue.inactivePerson">حركة لشخص غير نشط</option><option value="finalization_error" data-i18n="issue.finalizationError">تعذر إنهاء حركة</option><option value="automatic_finalization_pending" data-i18n="issue.autoFinalizationPending">المعالجة النهائية معلقة</option></select></label>
+          <label><span data-i18n="filters.device">الجهاز</span><select name="deviceId" data-device-select><option value="" data-i18n="filters.allDevices">كل الأجهزة</option></select></label>
+          <label><span data-i18n="filters.period">الفترة</span><select name="period" data-period-select="issues"><option value="all" data-i18n="period.all">كل الفترات</option><option value="last7" data-i18n="period.last7">آخر 7 أيام</option><option value="today" data-i18n="period.today">اليوم</option><option value="yesterday" data-i18n="period.yesterday">أمس</option><option value="month" data-i18n="period.month">هذا الشهر</option><option value="custom" data-i18n="period.custom">فترة مخصصة</option></select></label>
+          <div class="custom-range hidden" data-custom-range="issues"><label><span data-i18n="filters.from">من</span><input name="from" type="date"></label><label><span data-i18n="filters.to">إلى</span><input name="to" type="date"></label></div>
+          <div class="filter-actions"><button class="button primary" type="submit" data-i18n="filters.apply">تطبيق</button><button class="button ghost" type="button" data-reset-filters="issues" data-i18n="filters.clear">مسح</button></div>
+        </form>
+        <div id="issuesList" class="stack"></div>
+        <div id="issuesPagination" class="pagination"></div>
+      </section>
+    </section>
+
+    <section id="view-people" class="view">
+      <section class="panel">
+        <div class="panel-head panel-head-wrap">
+          <div>
+            <h2 data-i18n="people.title">الأشخاص</h2>
+            <p data-i18n="people.subtitle">الرقم هو رقم الشخص الموحد داخل نظام البصمة.</p>
+          </div>
+          <button id="showAddPerson" class="button secondary" type="button" data-i18n="people.add">إضافة شخص</button>
+        </div>
+        <form id="addPersonForm" class="inline-form hidden">
+          <label><span data-i18n="people.code">الرقم</span><input class="code-input" name="personCode" maxlength="64" required autocomplete="off"></label>
+          <label><span data-i18n="people.name">الاسم</span><input name="displayName" maxlength="255" required autocomplete="off"></label>
+          <button class="button primary" type="submit" data-i18n="actions.save">حفظ</button>
+          <button id="cancelAddPerson" class="button ghost" type="button" data-i18n="actions.cancel">إلغاء</button>
+        </form>
+        <form id="peopleFilters" class="filter-bar">
+          <label class="filter-grow"><span data-i18n="filters.search">بحث</span><input name="search" maxlength="100" autocomplete="off" data-i18n-placeholder="filters.searchPersonOrCodePlaceholder" placeholder="الاسم أو الرقم"></label>
+          <label><span data-i18n="people.status">الحالة</span><select name="status"><option value="" data-i18n="filters.allStatuses">كل الحالات</option><option value="active" data-i18n="people.active">نشط</option><option value="inactive" data-i18n="people.inactive">غير نشط</option></select></label>
+          <label><span data-i18n="filters.mappingStatus">حالة الربط</span><select name="mapping"><option value="" data-i18n="filters.allMappingStates">كل حالات الربط</option><option value="mapped" data-i18n="filters.mapped">مربوط</option><option value="unmapped" data-i18n="filters.unmapped">بدون جهاز مرتبط</option></select></label>
+          <label><span data-i18n="filters.device">الجهاز</span><select name="deviceId" data-device-select><option value="" data-i18n="filters.allDevices">كل الأجهزة</option></select></label>
+          <div class="filter-actions"><button class="button primary" type="submit" data-i18n="filters.apply">تطبيق</button><button class="button ghost" type="button" data-reset-filters="people" data-i18n="filters.clear">مسح</button></div>
+        </form>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th data-i18n="people.code">الرقم</th><th data-i18n="people.name">الاسم</th><th data-i18n="people.status">الحالة</th><th data-i18n="people.linkedDevices">الأجهزة المرتبطة</th><th data-i18n="people.historicalAction">معالجة البصمات القديمة</th></tr></thead>
+            <tbody id="peopleTable"></tbody>
+          </table>
+        </div>
+        <div id="peoplePagination" class="pagination"></div>
+      </section>
+    </section>
+
+    <section id="view-devices" class="view">
+      <section class="panel">
+        <div class="panel-head"><div><h2 data-i18n="devices.title">الأجهزة</h2><p data-i18n="devices.subtitle">الحالة فقط. لا نعرض إعدادات تقنية غير ضرورية.</p></div></div>
+        <form id="devicesFilters" class="filter-bar">
+          <label class="filter-grow"><span data-i18n="filters.search">بحث</span><input name="search" maxlength="100" autocomplete="off" data-i18n-placeholder="filters.searchDevicePlaceholder" placeholder="الاسم أو الموديل أو الرقم التسلسلي"></label>
+          <label><span data-i18n="people.status">الحالة</span><select name="status"><option value="" data-i18n="filters.allStatuses">كل الحالات</option><option value="active" data-i18n="devices.available">متاح</option><option value="inactive" data-i18n="devices.unavailable">غير متاح</option></select></label>
+          <label><span data-i18n="filters.mode">الوضع</span><select name="mode"><option value="" data-i18n="filters.allModes">كل الأوضاع</option><option value="test" data-i18n="devices.testMode">وضع اختبار</option><option value="live" data-i18n="devices.liveMode">وضع مباشر</option><option value="maintenance" data-i18n="devices.maintenanceMode">وضع صيانة</option></select></label>
+          <label><span data-i18n="filters.vendor">المورّد</span><select name="vendor" id="vendorSelect"><option value="" data-i18n="filters.allVendors">كل الموردين</option></select></label>
+          <div class="filter-actions"><button class="button primary" type="submit" data-i18n="filters.apply">تطبيق</button><button class="button ghost" type="button" data-reset-filters="devices" data-i18n="filters.clear">مسح</button></div>
+        </form>
+        <div id="devicesList" class="device-grid"></div>
+        <div id="devicesPagination" class="pagination"></div>
+      </section>
+    </section>
+  </main>
+
+  <dialog id="mapDialog">
+    <form method="dialog" class="dialog-card" id="mapExistingForm">
+      <div class="panel-head"><div><h2 data-i18n="mapping.title">ربط بشخص موجود</h2><p id="mapDialogHint"></p></div></div>
+      <label><span data-i18n="mapping.selectPerson">اختر الشخص</span><select id="personSelect" required></select></label>
+      <div class="dialog-actions"><button id="confirmMapExisting" class="button primary" type="submit" data-i18n="actions.map">ربط</button><button id="cancelMapDialog" class="button ghost" type="button" data-i18n="actions.cancel">إلغاء</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="eventDialog">
+    <section class="dialog-card">
+      <div class="panel-head"><div><h2 data-i18n="eventDetails.title">تفاصيل الحركة</h2><p data-i18n="eventDetails.subtitle">بيانات آمنة لإثبات الحركة داخل نظام البصمة.</p></div><button id="closeEventDialogTop" class="button ghost" type="button" data-i18n="actions.close">إغلاق</button></div>
+      <dl id="eventDetails" class="details-grid"></dl>
+      <div class="dialog-actions"><button id="copyEventReference" class="button secondary" type="button" data-i18n="eventDetails.copyReference">نسخ معرف الحركة</button><button id="closeEventDialog" class="button ghost" type="button" data-i18n="actions.close">إغلاق</button></div>
+    </section>
+  </dialog>
+
+
+  <dialog id="historicalDialog">
+    <section class="dialog-card">
+      <div class="panel-head"><div><h2 data-i18n="historical.title">معالجة البصمات القديمة</h2><p data-i18n="historical.subtitle">إعادة إتاحة حركات قديمة لهذا الشخص بعد ربطه في البرنامج الرئيسي. لا يتم تغيير أو حذف الحركات الأصلية.</p></div></div>
+      <p id="historicalPersonHint" class="item-title"></p>
+      <p class="item-meta" data-i18n="historical.rangeHint">اختر فترة لا تتجاوز 31 يومًا في كل مرة.</p>
+      <form id="historicalForm" class="historical-form">
+        <label><span data-i18n="filters.from">من</span><input name="from" type="date" required></label>
+        <label><span data-i18n="filters.to">إلى</span><input name="to" type="date" required></label>
+        <button class="button secondary" type="submit" data-i18n="historical.preview">فحص الحركات</button>
+      </form>
+      <div id="historicalPreviewResult" class="notice historical-preview hidden" role="status" aria-live="polite"></div>
+      <div class="historical-warning" data-i18n="historical.warning">هذه العملية ستصدر مراجع جديدة للحركات المختارة حتى يستطيع البرنامج الرئيسي قراءتها بعد الربط. الحركات الأصلية تبقى كما هي.</div>
+      <label class="historical-confirm"><input id="historicalConfirm" type="checkbox"><span data-i18n="historical.confirmLabel">أؤكد أنني أريد إعادة معالجة هذه الفترة يدويًا.</span></label>
+      <div class="dialog-actions">
+        <button id="historicalReprocessButton" class="button primary" type="button" disabled data-i18n="historical.reprocess">إعادة معالجة الحركات</button>
+        <button id="historicalCancel" class="button ghost" type="button" data-i18n="actions.cancel">إلغاء</button>
+      </div>
+    </section>
+  </dialog>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

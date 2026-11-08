@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+!.env.railway.staging.example
+var/
+service-logs/
+verification/
+*.log
+*.zip
+*.bak
+*.tgz
+.vscode/
+.idea/

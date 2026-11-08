@@ -1,0 +1,21 @@
+{
+  "purpose": "infrastructure-only staging; no real devices, database, admin UI or app delivery",
+  "application": "manual-reference-only; this file is not automatically applied by Railway",
+  "suggestedServiceName": "biometric-staging",
+  "sourceDirectory": "biometric-system directory contents only",
+  "builder": "DOCKERFILE",
+  "dockerfilePath": "Dockerfile",
+  "startCommand": "node src/railway-staging.js",
+  "healthcheckPath": "/health",
+  "healthcheckTimeoutSeconds": 60,
+  "restartPolicyType": "ON_FAILURE",
+  "restartPolicyMaxRetries": 3,
+  "replicas": 1,
+  "variables": {
+    "NODE_ENV": "production",
+    "PORT": "8080"
+  },
+  "domainTargetPort": 8080,
+  "volume": "not required for this no-data trial; runtime files are ephemeral",
+  "productionCutover": false
+}

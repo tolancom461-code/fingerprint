@@ -1,0 +1,22 @@
+{
+  "name": "tolan-biometric-service",
+  "version": "0.18.0",
+  "private": true,
+  "type": "module",
+  "description": "Isolated multi-device, multi-vendor biometric service with local standalone administration UI, identity management, and deterministic automatic finalization.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "start:railway-staging": "node src/railway-staging.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test tests/*.test.js",
+    "check:boundaries": "node --test tests/architecture-boundaries.test.js",
+    "finalize:punch": "node src/cli/finalize-punch.js",
+    "simulate:final-events-consumer": "node --env-file=.env src/cli/simulate-final-events-consumer.js"
+  },
+  "dependencies": {
+    "mysql2": "3.24.2"
+  }
+}
