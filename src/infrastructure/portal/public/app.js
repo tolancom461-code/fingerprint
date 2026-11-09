@@ -7,6 +7,12 @@ const descriptions = {
   people: ['الأشخاص', 'عرض الأشخاص واختبار إدارة سجل تجريبي معزول.'],
   events: ['الحركات', 'أمثلة دخول وخروج للعرض فقط، بتوقيت الرياض.']
 };
+const databaseDescriptions = {
+  overview: ['نظرة عامة', 'ملخص الأجهزة والأشخاص والحركات النهائية المحفوظة في قاعدة نظام البصمة.'],
+  devices: ['الأجهزة', 'الأجهزة المسجلة وآخر ملاحظة لها؛ وجود سجل لا يثبت الاتصال الحالي.'],
+  people: ['الأشخاص', 'الأشخاص المسجلون في نظام البصمة، للعرض فقط.'],
+  events: ['الحركات النهائية', 'الحركات النهائية المحفوظة، بتوقيت الرياض. لا تشمل الحركات المعلقة.']
+};
 const columns = {
   devices: ['الجهاز', 'الرقم التسلسلي', 'الطراز', 'حالة الاتصال', 'آخر اتصال'],
   people: ['الشخص', 'كود الشخص', 'الحالة'],
@@ -16,6 +22,48 @@ const numbers = new Intl.NumberFormat('ar-SA');
 const dates = new Intl.DateTimeFormat('ar-SA-u-ca-gregory', { timeZone: 'Asia/Riyadh', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 const state = { session: null, view: 'overview', pending: false, request: 0, list: null, searches: { devices: '', people: '', events: '' }, pages: { devices: 1, people: 1, events: 1 } };
 let searchTimer;
+
+function isDemo() { return (state.session?.mode ?? document.body.dataset.portalMode) === 'demo'; }
+function canCreatePerson() {
+  return state.session?.capabilities?.createPerson === true && state.session?.user.role === 'admin' && state.session?.mode === 'demo';
+}
+function columnNames(view) {
+  return view === 'devices' && !isDemo()
+    ? ['الجهاز', 'الرقم التسلسلي', 'الطراز', 'الحالة الإدارية', 'حالة الاتصال', 'آخر ملاحظة'] : columns[view];
+}
+
+function applyPortalMode() {
+  if (isDemo()) return;
+  for (const [id, text] of Object.entries({
+    sidebarModeName: 'قراءة فقط',
+    sidebarModeDescription: 'عرض السجلات المحفوظة دون تعديل بيانات النظام.',
+    bannerTitle: 'بيانات نظام البصمة · قراءة فقط',
+    bannerDescription: 'تعرض السجلات من قاعدة الخدمة دون إتاحة التعديل. وجود جهاز أو حركة محفوظة لا يثبت اتصال الجهاز الآن.',
+    bannerBadge: 'عرض البيانات',
+    statDevicesLabel: 'الأجهزة المسجلة',
+    statDevicesDescription: 'سجلات الأجهزة، وليست عدد الأجهزة المتصلة',
+    statPeopleDescription: 'الأشخاص المسجلون في قاعدة الخدمة',
+    statEventsLabel: 'الحركات النهائية',
+    statEventsDescription: 'حركات نهائية محفوظة؛ لا تشمل الحركات المعلقة',
+    deviceConnectionStatus: 'غير مؤكدة',
+    deviceConnectionDescription: 'هذه القراءة لا تختبر اتصال الأجهزة الحالي',
+    systemPanelTitle: 'حالة عرض البيانات',
+    systemPanelDescription: 'مصدر السجلات وحدود المعلومات المعروضة.',
+    systemPanelBadge: 'قراءة فقط',
+    sourceDescription: 'قاعدة بيانات نظام البصمة',
+    deviceReception: 'غير متحقق من هذه الواجهة',
+    deliveryState: 'غير متحقق من هذه الواجهة',
+    databaseLabel: 'تعديل البيانات',
+    databaseState: 'غير متاح في وضع القراءة',
+    exploreDescription: 'تصفح السجلات المحفوظة في نظام البصمة.',
+    exploreDevicesDescription: 'الأجهزة المسجلة وآخر ملاحظة لها',
+    explorePeopleDescription: 'عرض الأشخاص المسجلين',
+    exploreEventsDescription: 'الحركات النهائية بتوقيت الرياض'
+  })) $(id).textContent = text;
+  $('searchInput').maxLength = 100;
+  $('addPersonDialog').hidden = true;
+  $('addPersonForm').inert = true;
+}
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -75,7 +123,7 @@ function setView(view) {
   clearTimeout(searchTimer);
   state.view = view;
   state.list = null;
-  const [title, description] = descriptions[view];
+  const [title, description] = (isDemo() ? descriptions : databaseDescriptions)[view];
   $('pageTitle').textContent = title;
   $('breadcrumb').textContent = title;
   $('pageDescription').textContent = description;
@@ -88,14 +136,14 @@ function setView(view) {
   });
   $('overviewView').hidden = view !== 'overview';
   $('listView').hidden = view === 'overview';
-  $('addPersonButton').hidden = view !== 'people' || state.session?.user.role !== 'admin';
+  $('addPersonButton').hidden = view !== 'people' || !canCreatePerson();
   if (view !== 'overview') {
     $('searchInput').value = state.searches[view];
     $('searchInput').placeholder = view === 'people' ? 'ابحث بالاسم أو الكود…' : view === 'devices' ? 'ابحث باسم الجهاز أو رقمه…' : 'ابحث في الحركات…';
     $('listTitle').textContent = title;
-    $('tableCaption').textContent = `${title} · بيانات تجريبية`;
+    $('tableCaption').textContent = `${title} · ${isDemo() ? 'بيانات تجريبية' : 'قراءة فقط'}`;
     const row = element('tr');
-    for (const name of columns[view]) { const heading = element('th', name); heading.scope = 'col'; row.append(heading); }
+    for (const name of columnNames(view)) { const heading = element('th', name); heading.scope = 'col'; row.append(heading); }
     $('tableHead').replaceChildren(row);
     $('tableBody').replaceChildren();
   }
@@ -161,7 +209,7 @@ function updateCounts(counts) {
 function renderEmpty(title = 'لا توجد نتائج', detail = 'جرّب البحث بكلمة أخرى أو امسح البحث لعرض القائمة.') {
   const row = element('tr');
   const cell = element('td', undefined, 'empty-cell');
-  cell.colSpan = columns[state.view]?.length || 1;
+  cell.colSpan = columnNames(state.view)?.length || 1;
   cell.append(element('strong', title), element('p', detail));
   row.append(cell);
   $('tableBody').replaceChildren(row);
@@ -178,7 +226,7 @@ function badge(text, className = 'badge-neutral') {
 }
 
 function localTime(value) {
-  if (!value) return 'لم يتم الاتصال';
+  if (!value) return isDemo() ? 'لم يتم الاتصال' : 'لا توجد ملاحظة مسجلة';
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? 'وقت غير متاح' : dates.format(date);
 }
@@ -187,31 +235,39 @@ function renderList(view, data) {
   $('tableBody').replaceChildren();
   const items = Array.isArray(data.items) ? data.items : [];
   const total = Math.max(0, Number(data.page?.total) || 0);
-  $('listTotal').textContent = `${numbers.format(total)} ${view === 'devices' ? 'جهاز تجريبي' : view === 'people' ? 'شخص في مساحة التجربة' : 'حركة تجريبية'}`;
+  const nouns = isDemo()
+    ? { devices: 'جهاز تجريبي', people: 'شخص في مساحة التجربة', events: 'حركة تجريبية' }
+    : { devices: 'جهاز مسجل', people: 'شخص مسجل', events: 'حركة نهائية' };
+  $('listTotal').textContent = `${numbers.format(total)} ${nouns[view]}`;
   if (!items.length) renderEmpty();
   for (const item of items) {
     const row = element('tr');
     if (view === 'devices') {
-      cell(row, item.name || 'جهاز تجريبي', 'cell-primary');
+      cell(row, item.name || (isDemo() ? 'جهاز تجريبي' : 'جهاز مسجل'), 'cell-primary');
       cell(row, item.serialNumber || '—', 'cell-code');
       cell(row, item.model || '—');
-      cell(row).append(badge('غير متصل · تجريبي'));
+      if (!isDemo()) {
+        const statuses = { active: 'مفعّل', inactive: 'غير مفعّل' };
+        cell(row).append(badge(statuses[item.administrativeStatus] || 'غير معروف'));
+      }
+      cell(row).append(badge(isDemo() ? 'غير متصل · تجريبي' : 'غير مؤكدة'));
       cell(row, localTime(item.lastSeenAt));
     } else if (view === 'people') {
       cell(row, item.displayName || '—', 'cell-primary');
       cell(row, item.personCode || '—', 'cell-code');
-      cell(row).append(badge(item.status === 'active' ? 'نشط في التجربة' : 'غير نشط', item.status === 'active' ? 'badge-success' : 'badge-neutral'));
+      cell(row).append(badge(item.status === 'active' ? (isDemo() ? 'نشط في التجربة' : 'نشط') : 'غير نشط', item.status === 'active' ? 'badge-success' : 'badge-neutral'));
     } else {
       const person = cell(row);
       const stack = element('span', undefined, 'cell-stack');
       stack.append(element('strong', item.personName || item.personCode || '—', 'cell-primary'), element('small', item.personCode || '—', 'cell-code'));
       person.append(stack);
-      const entering = item.eventType === 'check_in';
-      cell(row).append(badge(entering ? 'دخول' : item.eventType === 'check_out' ? 'خروج' : 'حركة تجريبية', entering ? 'badge-check-in' : 'badge-check-out'));
+      const eventTypes = { check_in: 'دخول', check_out: 'خروج', break_in: 'عودة من استراحة', break_out: 'خروج لاستراحة', overtime_in: 'بداية إضافي', overtime_out: 'نهاية إضافي' };
+      const entering = ['check_in', 'break_in', 'overtime_in'].includes(item.eventType);
+      cell(row).append(badge(eventTypes[item.eventType] || (isDemo() ? 'حركة تجريبية' : 'غير معروف'), entering ? 'badge-check-in' : 'badge-check-out'));
       cell(row, item.eventTimeUtc ? localTime(item.eventTimeUtc) : 'وقت غير متاح');
       const methods = { face: 'الوجه', fingerprint: 'بصمة الإصبع', card: 'بطاقة', password: 'كلمة مرور', palm: 'راحة اليد' };
-      cell(row, methods[item.verificationMethod] || 'مثال تجريبي');
-      cell(row, item.deviceName || 'جهاز تجريبي');
+      cell(row, methods[item.verificationMethod] || (isDemo() ? 'مثال تجريبي' : 'غير معروف'));
+      cell(row, item.deviceName || (isDemo() ? 'جهاز تجريبي' : '—'));
     }
     $('tableBody').append(row);
   }
@@ -268,7 +324,7 @@ $('logoutButton').addEventListener('click', async () => {
   finally { $('logoutButton').disabled = false; }
 });
 $('addPersonButton').addEventListener('click', () => {
-  if (state.session?.user.role !== 'admin') return;
+  if (!canCreatePerson()) return;
   $('addPersonForm').reset();
   $('personFormError').hidden = true;
   $('addPersonDialog').showModal();
@@ -281,7 +337,7 @@ $('addPersonDialog').addEventListener('click', event => { if (event.target === $
 $('personCode').addEventListener('input', () => { $('personCode').value = $('personCode').value.toUpperCase(); });
 $('addPersonForm').addEventListener('submit', async event => {
   event.preventDefault();
-  if (state.session?.user.role !== 'admin' || $('savePersonButton').disabled || !$('addPersonForm').reportValidity()) return;
+  if (!canCreatePerson() || $('savePersonButton').disabled || !$('addPersonForm').reportValidity()) return;
   $('savePersonButton').disabled = true;
   $('savePersonButton').textContent = 'جارٍ الإضافة…';
   $('personFormError').hidden = true;
@@ -309,7 +365,8 @@ async function initializeSession() {
     $('accountName').textContent = user.username;
     $('accountRole').textContent = user.role === 'admin' ? 'مدير النظام' : 'عرض فقط';
     $('accountRole').parentElement.previousElementSibling.textContent = Array.from(user.username)[0]?.toUpperCase() || 'م';
-    $('readOnlyBadge').hidden = user.role === 'admin';
+    $('readOnlyBadge').hidden = user.role === 'admin' && isDemo();
+    applyPortalMode();
     setView(viewFromHash());
   } catch (error) {
     setLoading(false);
@@ -318,4 +375,5 @@ async function initializeSession() {
   }
 }
 
+if (document.body.dataset.portalMode === 'database-readonly') applyPortalMode();
 initializeSession();

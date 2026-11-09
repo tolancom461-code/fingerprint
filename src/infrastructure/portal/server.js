@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { stagingPortalConfig } from '../../config/staging-portal.js';
 import { createPortalAuth } from './auth.js';
 import { createDemoPortalService } from '../../application/demo-portal-service.js';
+import { createReadOnlyPortalService } from '../../application/read-only-portal-service.js';
 
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
 const assets = new Map([
@@ -15,10 +16,21 @@ const assets = new Map([
 export function createStagingPortalHandler({ env, runtime }) {
   const config = stagingPortalConfig(env, runtime);
   if (!config) return null;
+  return createPortalHandler({ config, service: createDemoPortalService(), mode: 'demo' });
+}
+
+// Not mounted by either current launcher. A later isolated database runtime must
+// supply its read store explicitly; no environment setting can switch demo data.
+export function createReadOnlyPortalHandler({ config, readStore }) {
+  return createPortalHandler({ config, service: createReadOnlyPortalService({ readStore }), mode: 'database-readonly' });
+}
+
+function createPortalHandler({ config, service, mode }) {
   const auth = createPortalAuth(config);
-  const service = createDemoPortalService();
   const expectedHost = new URL(config.origin).host.toLowerCase();
   const secure = config.origin.startsWith('https:');
+  const sessionPayload = session => ({ ...session, mode,
+    capabilities: { createPerson: mode === 'demo' && session.user.role === 'admin' } });
 
   return async function portalHandler(req, res) {
     const url = new URL(req.url || '/', config.origin);
@@ -39,23 +51,23 @@ export function createStagingPortalHandler({ env, runtime }) {
       const session = auth.session(req);
       if (req.method === 'GET' && pathname === '/login') {
         if (session) redirect(res, '/');
-        else await file(res, 'login.html', 'text/html; charset=utf-8');
+        else await file(res, 'login.html', 'text/html; charset=utf-8', mode);
         return true;
       }
       if (req.method === 'GET' && ['/', '/index.html'].includes(pathname)) {
         if (!session) redirect(res, '/login');
-        else await file(res, 'index.html', 'text/html; charset=utf-8');
+        else await file(res, 'index.html', 'text/html; charset=utf-8', mode);
         return true;
       }
       if (req.method === 'POST' && pathname === '/auth/login') {
         auth.assertOrigin(req);
         const body = await readJson(req);
-        json(res, 200, { ...await auth.login(req, res, body), mode: 'demo' });
+        json(res, 200, sessionPayload(await auth.login(req, res, body)));
         return true;
       }
       if (req.method === 'GET' && pathname === '/auth/session') {
         requireSession(session);
-        json(res, 200, { ...session, mode: 'demo' });
+        json(res, 200, sessionPayload(session));
         return true;
       }
       if (req.method === 'POST' && pathname === '/auth/logout') {
@@ -81,6 +93,7 @@ export function createStagingPortalHandler({ env, runtime }) {
         if (req.method === 'POST' && pathname === '/api/portal/people') {
           auth.requireWrite(req, session);
           if (session.user.role !== 'admin') throw coded('FORBIDDEN', 'هذا الحساب مخصص للعرض فقط', 403);
+          if (mode !== 'demo') throw coded('READ_ONLY', 'البوابة في وضع القراءة فقط', 403);
           const body = await readJson(req);
           json(res, 201, { person: await service.createPerson({ personCode: body.personCode, displayName: body.displayName }) });
           return true;
@@ -113,8 +126,9 @@ function headers(res, secure) {
   if (secure) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
 }
 
-async function file(res, filename, contentType) {
-  const body = await fs.readFile(path.join(publicDir, filename));
+async function file(res, filename, contentType, mode) {
+  let body = await fs.readFile(path.join(publicDir, filename));
+  if (mode) body = Buffer.from(body.toString('utf8').replace('<body ', `<body data-portal-mode="${mode}" `));
   res.writeHead(200, { 'Content-Type': contentType, 'Content-Length': body.length });
   res.end(body);
 }
@@ -166,7 +180,7 @@ function message(error, status) {
   if (status === 500) return 'تعذر إتمام الطلب';
   if (status === 401) return error.code === 'UNAUTHENTICATED' ? 'يرجى تسجيل الدخول' : 'اسم المستخدم أو كلمة المرور غير صحيحة';
   if (status === 429) return 'محاولات كثيرة، انتظر قليلًا ثم أعد المحاولة';
-  if (['HOST_MISMATCH', 'FORBIDDEN', 'JSON_REQUIRED', 'BODY_TOO_LARGE', 'INVALID_JSON'].includes(error.code)) return error.message;
+  if (['HOST_MISMATCH', 'FORBIDDEN', 'READ_ONLY', 'JSON_REQUIRED', 'BODY_TOO_LARGE', 'INVALID_JSON'].includes(error.code)) return error.message;
   if (status === 403) return 'تعذر التحقق من الطلب، حدّث الصفحة وأعد المحاولة';
   if (status === 409) return 'رمز الشخص التجريبي موجود مسبقًا أو تم بلوغ الحد التجريبي';
   return 'تحقق من القيم المدخلة';

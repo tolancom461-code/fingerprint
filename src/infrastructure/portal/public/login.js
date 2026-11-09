@@ -8,6 +8,15 @@ const submit = document.getElementById('loginSubmit');
 const submitLabel = document.getElementById('loginSubmitLabel');
 const toggle = document.getElementById('togglePassword');
 
+if (document.body.dataset.portalMode === 'database-readonly') {
+  for (const [id, text] of Object.entries({
+    loginModeIntro: 'عرض بيانات نظام البصمة بصلاحية قراءة فقط',
+    loginModeLabel: 'عرض البيانات · قراءة فقط',
+    loginModeTitle: 'عرض دون تعديل البيانات',
+    loginModeDescription: 'تعرض البوابة السجلات المحفوظة في قاعدة نظام البصمة. لا تتيح هذه الواجهة إضافة سجلات أو تعديلها، ولا يثبت ظهور جهاز أنه متصل حاليًا.'
+  })) document.getElementById(id).textContent = text;
+}
+
 toggle.addEventListener('click', () => {
   const shown = password.type === 'password';
   password.type = shown ? 'text' : 'password';

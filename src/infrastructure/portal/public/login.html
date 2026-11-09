@@ -20,11 +20,11 @@
         <h1 id="introTitle">الأجهزة والأشخاص<br>والحركات، في مكان واحد.</h1>
         <p>مساحة واضحة لمتابعة نظام البصمة وإدارة الوصول، مستقلة عن برامج الحضور والرواتب.</p>
       </div>
-      <div class="intro-note"><span class="intro-dot" aria-hidden="true"></span><span>بيئة تجريبية معزولة عن التشغيل الفعلي</span></div>
+      <div class="intro-note"><span class="intro-dot" aria-hidden="true"></span><span id="loginModeIntro">بيئة تجريبية معزولة عن التشغيل الفعلي</span></div>
     </section>
     <section class="login-content" aria-labelledby="loginTitle">
       <div class="login-form-wrap">
-        <div class="demo-label"><span aria-hidden="true">◈</span> نسخة تجريبية</div>
+        <div class="demo-label"><span aria-hidden="true">◈</span> <span id="loginModeLabel">نسخة تجريبية</span></div>
         <h2 id="loginTitle">تسجيل الدخول</h2>
         <p class="muted login-description">استخدم حساب الإدارة أو حساب العرض المخصص لك.</p>
         <div id="loginError" class="notice notice-error" role="alert" hidden></div>
@@ -42,7 +42,7 @@
           </div>
           <button id="loginSubmit" class="button button-primary button-full" type="submit"><span id="loginSubmitLabel">دخول إلى النظام</span><span class="button-arrow" aria-hidden="true">←</span></button>
         </form>
-        <div class="login-demo-note"><strong>هذه ليست بيانات الإنتاج.</strong><p>تعرض البوابة بيانات تجريبية فقط، ولا تتصل بجهاز بصمة حقيقي أو بقاعدة الإنتاج. تُمسح التغييرات التجريبية عند إعادة تشغيل الخدمة.</p></div>
+        <div class="login-demo-note"><strong id="loginModeTitle">هذه ليست بيانات الإنتاج.</strong><p id="loginModeDescription">تعرض البوابة بيانات تجريبية فقط، ولا تتصل بجهاز بصمة حقيقي أو بقاعدة الإنتاج. تُمسح التغييرات التجريبية عند إعادة تشغيل الخدمة.</p></div>
         <p class="login-footer">لا توجد حسابات افتراضية. بيانات الدخول يحددها مسؤول النظام.</p>
       </div>
     </section>
