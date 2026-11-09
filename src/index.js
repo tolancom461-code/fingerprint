@@ -15,6 +15,7 @@ import { startDurableIngestRetryLoop } from './application/start-durable-ingest-
 import { startAutomaticFinalizationRetryLoop } from './application/start-automatic-finalization-retry-loop.js';
 import { FileDiagnosticLog } from './infrastructure/logging/file-diagnostic-log.js';
 import { createHttpServer } from './infrastructure/http/server.js';
+import { createStagingPortalHandler } from './infrastructure/portal/server.js';
 import { createAdminServer } from './infrastructure/admin/server.js';
 import { createFinalEventsApiServer } from './infrastructure/integration/final-events-api-server.js';
 import { EnvDeviceRegistry } from './infrastructure/storage/env-device-registry.js';
@@ -38,6 +39,7 @@ import { ZktecoAdmsAdapter } from './infrastructure/vendors/zkteco/http-adapter.
 
 const serviceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const config = loadConfig(serviceRoot);
+const portalHandler = createStagingPortalHandler({ env: process.env, runtime: config });
 const deviceRegistry = new EnvDeviceRegistry(config.allowedDevices);
 const diagnosticLog = new FileDiagnosticLog(config.logDir, {
   maxBytes: config.logMaxBytes,
@@ -177,7 +179,7 @@ const zktecoAdapter = new ZktecoAdmsAdapter({
 });
 
 const adapterRegistry = new VendorAdapterRegistry([zktecoAdapter]);
-const server = createHttpServer({ adapterRegistry, diagnosticLog });
+const server = createHttpServer({ adapterRegistry, diagnosticLog, portalHandler });
 
 adminServer?.on('error', (error) => {
   console.error(`[biometric-service] admin UI unavailable: ${error?.message ?? error}`);

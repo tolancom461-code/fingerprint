@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { BodyTooLargeError, text } from './http-utils.js';
 
-export function createHttpServer({ adapterRegistry, diagnosticLog }) {
+export function createHttpServer({ adapterRegistry, diagnosticLog, portalHandler = null }) {
   return http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url || '/', 'http://biometric.local');
@@ -9,6 +9,8 @@ export function createHttpServer({ adapterRegistry, diagnosticLog }) {
       if (req.method === 'GET' && url.pathname === '/health') {
         return text(res, 200, 'OK');
       }
+
+      if (portalHandler && await portalHandler(req, res)) return;
 
       const adapter = adapterRegistry.match(req);
       if (!adapter) return text(res, 404, 'NOT_FOUND');

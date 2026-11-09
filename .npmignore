@@ -2,6 +2,7 @@
 .env.*
 !.env.example
 !.env.railway.staging.example
+!.env.portal.example
 var/
 service-logs/
 verification/

@@ -10,6 +10,7 @@
   "scripts": {
     "start": "node src/index.js",
     "start:railway-staging": "node src/railway-staging.js",
+    "admin:password-hash": "node scripts/hash-admin-password.mjs",
     "dev": "node --watch src/index.js",
     "test": "node --test tests/*.test.js",
     "check:boundaries": "node --test tests/architecture-boundaries.test.js",

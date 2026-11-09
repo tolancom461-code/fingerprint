@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>لوحة الإدارة · نظام البصمة</title>
+  <link rel="stylesheet" href="/portal.css">
+  <script src="/portal-app.js" defer></script>
+</head>
+<body class="portal-page">
+  <a class="skip-link" href="#mainContent">الانتقال إلى المحتوى</a>
+  <aside id="sidebar" class="sidebar" aria-label="القائمة الرئيسية">
+    <a class="brand" href="/" aria-label="نظام البصمة، النظرة العامة">
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M8 15a8 8 0 0 1 16 0v4m-20-3a12 12 0 0 1 24 0v3M12 26V15a4 4 0 0 1 8 0v9m-4-9v14M8 19v5m16-1v3"/></svg></span>
+      <span>نظام البصمة<small>بوابة الإدارة المستقلة</small></span>
+    </a>
+    <div class="sidebar-caption">مساحة العمل</div>
+    <nav class="navigation" aria-label="أقسام النظام">
+      <button class="nav-item is-active" data-view="overview" type="button" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span>نظرة عامة</span></button>
+      <button class="nav-item" data-view="devices" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M9 6h6M10 18h4M10 11a2 2 0 0 1 4 0v3m-2-3v4"/></svg><span>الأجهزة</span><span id="navDevicesCount" class="nav-count">—</span></button>
+      <button class="nav-item" data-view="people" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="7" r="4"/><path d="M2 21v-2a7 7 0 0 1 14 0v2M16 3a4 4 0 0 1 0 8m3 10v-2a7 7 0 0 0-3-5.7"/></svg><span>الأشخاص</span><span id="navPeopleCount" class="nav-count">—</span></button>
+      <button class="nav-item" data-view="events" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h12v18H4V7m4-4v4H4m5 5h7m-7 4h7"/></svg><span>الحركات</span><span id="navEventsCount" class="nav-count">—</span></button>
+    </nav>
+    <div class="sidebar-bottom"><span class="badge badge-demo">بيئة تجريبية</span><p>واجهة معزولة لاختبار الإدارة والصلاحيات قبل ربط البيانات الفعلية.</p></div>
+  </aside>
+  <div id="sidebarBackdrop" class="sidebar-backdrop" hidden></div>
+  <div class="workspace">
+    <header class="topbar">
+      <div class="topbar-heading"><button id="menuToggle" class="icon-button mobile-menu" type="button" aria-label="فتح القائمة الرئيسية" aria-controls="sidebar" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button><span class="topbar-breadcrumb">نظام البصمة<span aria-hidden="true">/</span><strong id="breadcrumb">نظرة عامة</strong></span></div>
+      <div class="account"><span class="account-avatar" aria-hidden="true">م</span><div class="account-info"><strong id="accountName">جارٍ التحقق…</strong><span id="accountRole">جلسة آمنة</span></div><button id="logoutButton" class="button button-quiet" type="button">خروج</button></div>
+    </header>
+    <main id="mainContent" class="main-content" tabindex="-1" aria-busy="true">
+      <div class="demo-banner" role="note"><span class="demo-banner-icon" aria-hidden="true">◈</span><div><strong>بيانات تجريبية معزولة</strong><p>غير متصلة بجهاز حقيقي أو قاعدة الإنتاج. التغييرات تُمسح عند إعادة تشغيل الخدمة.</p></div><span class="badge badge-demo">تجربة الإدارة</span></div>
+      <div id="globalNotice" class="notice" role="status" aria-live="polite" hidden></div>
+      <section class="page-heading"><div><span class="eyebrow">بوابة الإدارة</span><h1 id="pageTitle">نظرة عامة</h1><p id="pageDescription">ملخص الأجهزة والأشخاص والحركات في مساحة التجربة.</p></div><div class="page-actions"><span id="readOnlyBadge" class="badge badge-neutral" hidden>صلاحية عرض فقط</span><button id="refreshButton" class="button button-secondary" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7V3l-3 3a8 8 0 1 0 2.5 9M20 3h-5"/></svg><span>تحديث</span></button></div></section>
+      <section id="overviewView" class="view" aria-label="نظرة عامة">
+        <div class="stats-grid">
+          <article class="stat-card"><div class="stat-label"><span>الأجهزة التجريبية</span><span class="stat-symbol symbol-indigo" aria-hidden="true">▣</span></div><strong id="statDevices" class="stat-value">—</strong><p>نماذج عرض، لا يوجد اتصال فعلي</p></article>
+          <article class="stat-card"><div class="stat-label"><span>الأشخاص</span><span class="stat-symbol symbol-blue" aria-hidden="true">♧</span></div><strong id="statPeople" class="stat-value">—</strong><p>سجل الأشخاص في بيئة التجربة</p></article>
+          <article class="stat-card"><div class="stat-label"><span>الحركات التجريبية</span><span class="stat-symbol symbol-teal" aria-hidden="true">⇄</span></div><strong id="statEvents" class="stat-value">—</strong><p>أمثلة للعرض وليست بصمات جهاز</p></article>
+          <article class="stat-card"><div class="stat-label"><span>حالة ربط الأجهزة</span><span class="stat-symbol symbol-gray" aria-hidden="true">○</span></div><strong class="stat-status">غير متصل</strong><p>استقبال الأجهزة الحقيقية معطّل</p></article>
+        </div>
+        <div class="overview-grid">
+          <article class="panel system-panel"><div class="panel-heading"><div><h2>حالة مساحة التجربة</h2><p>ما الذي يمكن اختباره في هذه النسخة؟</p></div><span class="badge badge-neutral">معزولة</span></div><dl class="system-facts"><div><dt>مصدر البيانات</dt><dd>بيانات وهمية داخل ذاكرة الخدمة</dd></div><div><dt>الأجهزة الحقيقية</dt><dd><span class="badge badge-neutral">الاستقبال معطّل</span></dd></div><div><dt>الإرسال للبرامج الأخرى</dt><dd><span class="badge badge-neutral">معطّل</span></dd></div><div><dt>قاعدة بيانات الإنتاج</dt><dd>غير مستخدمة في هذه التجربة</dd></div><div><dt>آخر تحديث للعرض</dt><dd id="lastUpdated">—</dd></div></dl></article>
+          <article class="panel explore-panel"><div class="panel-heading"><div><h2>ابدأ الاستكشاف</h2><p>تصفح بيانات التجربة بأمان.</p></div></div><button class="explore-link" type="button" data-view="devices"><span class="explore-icon" aria-hidden="true">▣</span><span><strong>الأجهزة</strong><small>نماذج الأجهزة وحالة الاتصال</small></span><span class="explore-arrow" aria-hidden="true">←</span></button><button class="explore-link" type="button" data-view="people"><span class="explore-icon" aria-hidden="true">♧</span><span><strong>الأشخاص</strong><small>عرض الأشخاص واختبار صلاحية الإضافة</small></span><span class="explore-arrow" aria-hidden="true">←</span></button><button class="explore-link" type="button" data-view="events"><span class="explore-icon" aria-hidden="true">⇄</span><span><strong>الحركات</strong><small>أمثلة دخول وخروج بتوقيت الرياض</small></span><span class="explore-arrow" aria-hidden="true">←</span></button></article>
+        </div>
+      </section>
+      <section id="listView" class="view panel list-panel" aria-labelledby="listTitle" hidden>
+        <div class="list-toolbar"><div><h2 id="listTitle">الأجهزة</h2><span id="listTotal" class="muted">جارٍ تحميل البيانات…</span></div><div class="list-tools"><form id="searchForm" class="search-form" role="search"><label class="sr-only" for="searchInput">البحث في القائمة</label><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><input id="searchInput" type="search" placeholder="بحث…" autocomplete="off" maxlength="120"><button class="sr-only" type="submit">بحث</button></form><button id="addPersonButton" class="button button-primary" type="button" hidden><span aria-hidden="true">+</span> شخص تجريبي</button></div></div>
+        <div id="tableStatus" class="table-status" role="status" aria-live="polite" hidden>جارٍ تحميل البيانات…</div>
+        <div class="table-scroll"><table><caption id="tableCaption" class="sr-only">قائمة البيانات التجريبية</caption><thead id="tableHead"></thead><tbody id="tableBody"></tbody></table></div>
+        <div class="table-footer"><span id="pageSummary" class="muted">—</span><div class="pagination"><button id="previousPage" class="button button-secondary button-small" type="button">السابق</button><span id="pageNumber" class="page-number">١</span><button id="nextPage" class="button button-secondary button-small" type="button">التالي</button></div></div>
+      </section>
+      <footer class="workspace-footer"><span>نظام البصمة المستقل</span><span>عرض الأوقات بتوقيت الرياض</span></footer>
+    </main>
+  </div>
+  <dialog id="addPersonDialog" class="modal" aria-labelledby="addPersonTitle" aria-describedby="addPersonHint">
+    <div class="modal-heading"><div><span class="eyebrow">صلاحية المدير</span><h2 id="addPersonTitle">إضافة شخص تجريبي</h2></div><button id="closePersonDialog" class="icon-button" type="button" aria-label="إغلاق نافذة الإضافة">×</button></div>
+    <p id="addPersonHint" class="muted">يُحفظ داخل ذاكرة التجربة فقط، ولا يُضاف إلى جهاز أو برنامج آخر.</p>
+    <div id="personFormError" class="notice notice-error" role="alert" hidden></div>
+    <form id="addPersonForm"><div class="field"><label for="personCode">كود الشخص</label><input id="personCode" name="personCode" dir="ltr" placeholder="DEMO-004" pattern="DEMO-[A-Za-z0-9._-]+" maxlength="64" autocomplete="off" required><small>استخدم كودًا تجريبيًا يبدأ بـ <bdi>DEMO-</bdi>.</small></div><div class="field"><label for="personName">الاسم</label><input id="personName" name="displayName" maxlength="100" autocomplete="off" required></div><div class="modal-actions"><button id="savePersonButton" class="button button-primary" type="submit">إضافة الشخص</button><button id="cancelPersonDialog" class="button button-secondary" type="button">إلغاء</button></div></form>
+  </dialog>
+</body>
+</html>

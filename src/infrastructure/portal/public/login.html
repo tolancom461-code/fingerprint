@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>تسجيل الدخول · نظام البصمة</title>
+  <link rel="stylesheet" href="/portal.css">
+  <script src="/portal-login.js" defer></script>
+</head>
+<body class="login-page">
+  <main class="login-shell">
+    <section class="login-intro" aria-labelledby="introTitle">
+      <div class="brand brand-light">
+        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M8 15a8 8 0 0 1 16 0v4m-20-3a12 12 0 0 1 24 0v3M12 26V15a4 4 0 0 1 8 0v9m-4-9v14M8 19v5m16-1v3"/></svg></span>
+        <span>نظام البصمة<small>إدارة مستقلة للأجهزة والحركات</small></span>
+      </div>
+      <div class="intro-copy">
+        <span class="eyebrow light-eyebrow">بوابة الإدارة المستقلة</span>
+        <h1 id="introTitle">الأجهزة والأشخاص<br>والحركات، في مكان واحد.</h1>
+        <p>مساحة واضحة لمتابعة نظام البصمة وإدارة الوصول، مستقلة عن برامج الحضور والرواتب.</p>
+      </div>
+      <div class="intro-note"><span class="intro-dot" aria-hidden="true"></span><span>بيئة تجريبية معزولة عن التشغيل الفعلي</span></div>
+    </section>
+    <section class="login-content" aria-labelledby="loginTitle">
+      <div class="login-form-wrap">
+        <div class="demo-label"><span aria-hidden="true">◈</span> نسخة تجريبية</div>
+        <h2 id="loginTitle">تسجيل الدخول</h2>
+        <p class="muted login-description">استخدم حساب الإدارة أو حساب العرض المخصص لك.</p>
+        <div id="loginError" class="notice notice-error" role="alert" hidden></div>
+        <form id="loginForm">
+          <div class="field">
+            <label for="username">اسم المستخدم</label>
+            <input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="80" required dir="auto">
+          </div>
+          <div class="field">
+            <label for="password">كلمة المرور</label>
+            <div class="password-field">
+              <input id="password" name="password" type="password" autocomplete="current-password" maxlength="256" required>
+              <button id="togglePassword" class="password-toggle" type="button" aria-controls="password" aria-pressed="false">إظهار</button>
+            </div>
+          </div>
+          <button id="loginSubmit" class="button button-primary button-full" type="submit"><span id="loginSubmitLabel">دخول إلى النظام</span><span class="button-arrow" aria-hidden="true">←</span></button>
+        </form>
+        <div class="login-demo-note"><strong>هذه ليست بيانات الإنتاج.</strong><p>تعرض البوابة بيانات تجريبية فقط، ولا تتصل بجهاز بصمة حقيقي أو بقاعدة الإنتاج. تُمسح التغييرات التجريبية عند إعادة تشغيل الخدمة.</p></div>
+        <p class="login-footer">لا توجد حسابات افتراضية. بيانات الدخول يحددها مسؤول النظام.</p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

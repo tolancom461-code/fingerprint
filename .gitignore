@@ -7,6 +7,7 @@ node_modules/
 .env.*
 !.env.example
 !.env.railway.staging.example
+!.env.portal.example
 
 # Actual device data, delivery cursors, diagnostics and local evidence
 var/
