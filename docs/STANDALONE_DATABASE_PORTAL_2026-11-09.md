@@ -26,6 +26,8 @@
 
 ## تجهيز النشر في Railway
 
+متابعة فعلية بتاريخ 9 نوفمبر 2026 الساعة 14:52 بتوقيت الرياض: تحقق النشر العام بنجاح؛ `/ready` أعاد 200 وdatabase-readonly، ونجح دخول المدير وعرض النظرة العامة والقوائم بأعداد 1 جهاز و5 أشخاص و33 حركة نهائية. اكتمل تسجيل الخروج وأعيد رفض الجلسة القديمة بـ401. الدليل المحلي المنقح `verification/railway-real-database-public-check-2026-11-09.json` لا يحفظ بيانات شخصية أو اعتمادات. هذه نتيجة بوابة القراءة وحدها؛ لم يفعّل استقبال جهاز أو توصيل حركات.
+
 1. ارفع محتويات مشروع `biometric-system` إلى مستودع البصمة المعتاد. لا ترفع ملفات `.env` الخاصة أو `verification` أو نسخ البيانات. ملف المثال العام `.env.portal-database.example` مسموح وحده.
 2. في Settings اضبط Start Command إلى `node src/railway.js` إذا كان هناك أمر قديم مفروض، وHealthcheck Path إلى `/ready`، والمنفذ إلى 8080، وReplicas إلى 1. ملف `deploy/railway-readonly.settings.json` مرجع يدوي ولا يطبقه Railway تلقائيًا. عند غياب أمر مفروض يعتمد Railway CMD في Docker؛ راجع [توثيق Start Command](https://docs.railway.com/deployments/start-command).
 3. ملف `.env.railway.readonly.tidb` المحلي يحتوي المتغيرات الجاهزة بحساب القراءة الجديد. **أضف محتواه تحت المتغيرات الحالية في Raw Editor، مع إبقاء المتغيرات الحالية**، أو أضف كل متغير على حدة. لا تستبدل القائمة كاملة: الهاش الجديد يشير إلى `BIOMETRIC_STAGING_ADMIN_PASSWORD_HASH` الموجود حاليًا. هذا المرجع من صيغة Railway الرسمية [للمتغيرات في الخدمة نفسها](https://docs.railway.com/variables). لا تضف حساب root أو بيانات المصدر أو كلمة مرور دخول صريحة.
