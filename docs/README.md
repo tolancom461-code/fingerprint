@@ -1,5 +1,7 @@
 # Biometric Documentation — TolanWorkforce
 
+> هذا الفهرس منقول من الخدمة الأصلية ويصف تشغيلها السابق. لحالة المشروع المستقل بتاريخ 9 نوفمبر 2026 ابدأ بـ[README المستقل](../README.md)، و[نسخ قاعدة البصمة](BIOMETRIC_DATABASE_REBUILD_2026-11-09.md)، و[بوابة القراءة وإعدادات Railway](STANDALONE_DATABASE_PORTAL_2026-11-09.md). لم تحول هذه الخطوات الجهاز أو خدمة Windows إلى النشر الجديد.
+
 **Last verified:** 2026-09-07  
 **Current biometric-service:** `v0.18.0`  
 **Real terminal:** ZKTeco SpeedFace-V5L / ZAM230  

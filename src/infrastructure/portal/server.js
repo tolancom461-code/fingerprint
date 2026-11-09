@@ -19,8 +19,8 @@ export function createStagingPortalHandler({ env, runtime }) {
   return createPortalHandler({ config, service: createDemoPortalService(), mode: 'demo' });
 }
 
-// Not mounted by either current launcher. A later isolated database runtime must
-// supply its read store explicitly; no environment setting can switch demo data.
+// Production and Railway demo launchers do not mount this handler. The isolated
+// test runtime supplies its read store explicitly; demo settings cannot switch it.
 export function createReadOnlyPortalHandler({ config, readStore }) {
   return createPortalHandler({ config, service: createReadOnlyPortalService({ readStore }), mode: 'database-readonly' });
 }

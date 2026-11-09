@@ -1,4 +1,4 @@
-# Infrastructure-only staging image. Do not change CMD to the production entry point.
+# Explicit Railway modes: demo by default, or the SELECT-only database portal.
 FROM node:22-bookworm-slim
 
 WORKDIR /app
@@ -13,4 +13,4 @@ RUN mkdir -p /app/var && chown node:node /app/var
 
 USER node
 EXPOSE 8080
-CMD ["node", "src/railway-staging.js"]
+CMD ["node", "src/railway.js"]

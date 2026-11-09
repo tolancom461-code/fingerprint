@@ -8,6 +8,8 @@ node_modules/
 !.env.example
 !.env.railway.staging.example
 !.env.portal.example
+!.env.readonly-test.example
+!.env.portal-database.example
 
 # Actual device data, delivery cursors, diagnostics and local evidence
 var/

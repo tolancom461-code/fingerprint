@@ -1,0 +1,25 @@
+{
+  "purpose": "Authenticated SELECT-only portal on the copied fingerprint database",
+  "application": "manual-reference-only; this file is not automatically applied by Railway",
+  "sourceDirectory": "biometric-system directory contents only",
+  "builder": "DOCKERFILE",
+  "dockerfilePath": "Dockerfile",
+  "startCommand": "node src/railway.js",
+  "healthcheckPath": "/ready",
+  "healthcheckTimeoutSeconds": 60,
+  "restartPolicyType": "ON_FAILURE",
+  "restartPolicyMaxRetries": 3,
+  "replicas": 1,
+  "domainTargetPort": 8080,
+  "variablesTemplate": ".env.portal-database.example",
+  "variables": {
+    "NODE_ENV": "production",
+    "PORT": "8080",
+    "BIOMETRIC_RAILWAY_MODE": "database-readonly"
+  },
+  "volume": "not required for this read-only portal; sessions are in memory",
+  "deviceIngest": false,
+  "processing": false,
+  "outboundDelivery": false,
+  "productionDeviceCutover": false
+}

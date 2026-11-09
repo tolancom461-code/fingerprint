@@ -10,6 +10,10 @@
   "scripts": {
     "start": "node src/index.js",
     "start:railway-staging": "node src/railway-staging.js",
+    "start:railway": "node src/railway.js",
+    "start:portal-database": "node src/portal-database.js",
+    "start:portal-test": "node src/test-portal.js",
+    "verify:portal-mysql": "node scripts/verify-test-portal-mysql.mjs",
     "admin:password-hash": "node scripts/hash-admin-password.mjs",
     "dev": "node --watch src/index.js",
     "test": "node --test tests/*.test.js",

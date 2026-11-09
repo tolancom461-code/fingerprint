@@ -3,6 +3,8 @@
 !.env.example
 !.env.railway.staging.example
 !.env.portal.example
+!.env.readonly-test.example
+!.env.portal-database.example
 var/
 service-logs/
 verification/
