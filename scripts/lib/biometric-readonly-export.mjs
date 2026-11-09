@@ -18,10 +18,11 @@ export async function exportBiometricBackup({ connection, schema, purpose, write
     if (!connection || typeof connection.execute !== 'function' || typeof connection.query !== 'function' ||
         typeof writeRowsFile !== 'function' || typeof waitFn !== 'function' ||
         !Number.isSafeInteger(settleMs) || settleMs < 0 || settleMs > 30000 ||
-        !((purpose === 'source' && schema === 'test') || (purpose === 'destination' && schema === 'fingerprint'))) {
+        !((purpose === 'source' && schema === 'test') ||
+          (['destination', 'standalone-destination'].includes(purpose) && schema === 'fingerprint'))) {
       throw invalid('INPUT_INVALID');
     }
-    const names = purpose === 'source' ? MIGRATION_TABLES : BACKUP_TABLES;
+    const names = purpose === 'destination' ? BACKUP_TABLES : MIGRATION_TABLES;
     const read = async (sql, params = []) => {
       const result = await connection.execute(sql, params);
       if (!Array.isArray(result) || !Array.isArray(result[0])) throw invalid('READ_RESULT_INVALID');

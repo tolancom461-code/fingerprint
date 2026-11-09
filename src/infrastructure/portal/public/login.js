@@ -17,6 +17,15 @@ if (document.body.dataset.portalMode === 'database-readonly') {
   })) document.getElementById(id).textContent = text;
 }
 
+if (document.body.dataset.portalMode === 'database-ingest') {
+  for (const [id, text] of Object.entries({
+    loginModeIntro: 'متابعة الحركات المستلمة ومستخدمي الأجهزة',
+    loginModeLabel: 'بوابة استقبال البصمة',
+    loginModeTitle: 'دخول محمي إلى سجلات الاستقبال',
+    loginModeDescription: 'تعرض البوابة سجلات الاستقبال وحالة معالجتها والهويات المرسلة من الأجهزة. ظهور سجل جهاز لا يثبت اتصاله الحالي.'
+  })) document.getElementById(id).textContent = text;
+}
+
 toggle.addEventListener('click', () => {
   const shown = password.type === 'password';
   password.type = shown ? 'text' : 'password';

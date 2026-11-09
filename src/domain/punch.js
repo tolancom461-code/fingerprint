@@ -37,6 +37,7 @@ export function createCanonicalPunchFromIngest(ingest) {
     workCode: payload.workCode ?? null,
     extraFields: Object.freeze([...(payload.extraFields ?? [])]),
     wireSourceBytes: ingest.sourceBytes ?? null,
-    receivedAt: ingest.receivedAt
+    receivedAt: ingest.receivedAt,
+    automaticFinalizationEligible: ingest.automaticFinalizationEligible === true
   });
 }

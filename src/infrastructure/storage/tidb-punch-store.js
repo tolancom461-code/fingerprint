@@ -19,7 +19,8 @@ export class TiDbPunchStore extends PunchStore {
 
   async init() {}
 
-  async putIfAbsent(punch, { createAutomaticFinalizationIntent = false } = {}) {
+  async putIfAbsent(punch, { createAutomaticFinalizationIntent = punch?.automaticFinalizationEligible === true } = {}) {
+    if (typeof createAutomaticFinalizationIntent !== 'boolean') throw new TypeError('createAutomaticFinalizationIntent must be a boolean');
     requireDbId(punch.ingestEventId, 'punch.ingestEventId');
     requireDbId(punch.deviceId, 'punch.deviceId');
     if (!punch.deviceUserId) throw new Error('punch.deviceUserId is required for database storage');

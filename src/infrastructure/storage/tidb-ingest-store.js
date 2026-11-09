@@ -5,18 +5,49 @@ import { BIOMETRIC_TABLES } from './biometric-table-names.js';
 const I = BIOMETRIC_TABLES.ingestEvents;
 const P = BIOMETRIC_TABLES.eventProcessing;
 const D = BIOMETRIC_TABLES.devices;
+const AUTOMATIC_ELIGIBILITY = 'automatic_finalization_eligible';
 
 export class TiDbIngestStore extends IngestStore {
-  constructor({ pool, deviceStore, replayLimit = 1000 }) {
+  constructor({ pool, deviceStore, replayLimit = 1000, autoFinalizeNewCaptures = false }) {
     super();
     this.pool = pool;
     this.deviceStore = deviceStore;
     this.replayLimit = replayLimit;
+    if (typeof autoFinalizeNewCaptures !== 'boolean') throw new TypeError('autoFinalizeNewCaptures must be a boolean');
+    this.autoFinalizeNewCaptures = autoFinalizeNewCaptures;
+    this.eligibilityColumnAvailable = false;
+    this.initialization = null;
   }
 
-  async init() {}
+  async init() {
+    if (!this.initialization) this.initialization = this.#initializeEligibility();
+    return this.initialization;
+  }
+
+  async #initializeEligibility() {
+    const [rows] = await this.pool.execute(
+      `SELECT DATA_TYPE, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT
+         FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+      [P, AUTOMATIC_ELIGIBILITY]
+    );
+    if (!Array.isArray(rows) || rows.length > 1) throw eligibilityError('AUTOMATIC_ELIGIBILITY_SCHEMA_INVALID');
+    if (rows.length === 0) {
+      if (this.autoFinalizeNewCaptures) throw eligibilityError('AUTOMATIC_ELIGIBILITY_SCHEMA_REQUIRED');
+      return;
+    }
+    const column = rows[0];
+    if (String(column.DATA_TYPE ?? column.data_type).toLowerCase() !== 'tinyint' ||
+        !/^tinyint(?:\([0-9]+\))?\s+unsigned$/i.test(String(column.COLUMN_TYPE ?? column.column_type)) ||
+        String(column.IS_NULLABLE ?? column.is_nullable).toUpperCase() !== 'NO' ||
+        String(column.COLUMN_DEFAULT ?? column.column_default) !== '0') {
+      throw eligibilityError('AUTOMATIC_ELIGIBILITY_SCHEMA_INVALID');
+    }
+    this.eligibilityColumnAvailable = true;
+  }
 
   async putIfAbsent(event) {
+    await this.init();
     const device = await this.deviceStore.observe({
       device: { vendor: event.vendor, serialNumber: event.serialNumber },
       remoteAddress: event.remoteAddress,
@@ -82,17 +113,31 @@ export class TiDbIngestStore extends IngestStore {
       const row = await selectById(connection, ingestEventId);
       const hasCanonicalPayload = row?.safe_payload != null;
       const processingStatus = hasCanonicalPayload && policy.canonicalEligible ? 'pending' : 'not_applicable';
+      const newAutomaticEligibility = inserted && this.autoFinalizeNewCaptures && hasCanonicalPayload &&
+        policy.canonicalEligible && event.parseValid === true && event.safeToAcknowledge === true &&
+        isOne(row?.parse_valid) && isOne(row?.safe_to_acknowledge);
       await connection.execute(
-        `INSERT INTO \`${P}\` (ingest_event_id, status)
-         VALUES (?, ?)
+        `INSERT INTO \`${P}\` (ingest_event_id, status${this.eligibilityColumnAvailable ? `, ${AUTOMATIC_ELIGIBILITY}` : ''})
+         VALUES (?, ?${this.eligibilityColumnAvailable ? ', ?' : ''})
          ON DUPLICATE KEY UPDATE ingest_event_id = VALUES(ingest_event_id)`,
-        [ingestEventId, processingStatus]
+        [ingestEventId, processingStatus, ...(this.eligibilityColumnAvailable ? [newAutomaticEligibility ? 1 : 0] : [])]
       );
+      let automaticEligibility = 0;
+      if (this.eligibilityColumnAvailable) {
+        const [processing] = await connection.execute(
+          `SELECT ${AUTOMATIC_ELIGIBILITY} FROM \`${P}\` WHERE ingest_event_id = ? LIMIT 1`, [ingestEventId]
+        );
+        if (!Array.isArray(processing) || processing.length !== 1 ||
+            ![0, 1, '0', '1'].includes(processing[0]?.[AUTOMATIC_ELIGIBILITY])) {
+          throw eligibilityError('AUTOMATIC_ELIGIBILITY_STATE_INVALID');
+        }
+        automaticEligibility = processing[0][AUTOMATIC_ELIGIBILITY];
+      }
 
       await connection.commit();
       return {
         status: inserted ? 'inserted' : 'duplicate',
-        record: fromRow(row, device),
+        record: fromRow(row, device, automaticEligibility),
         canonicalEligible: hasCanonicalPayload && policy.canonicalEligible,
         policyReason: policy.reason
       };
@@ -105,8 +150,10 @@ export class TiDbIngestStore extends IngestStore {
   }
 
   async list() {
+    await this.init();
     const [rows] = await this.pool.execute(
       `SELECT i.*,
+              ${this.eligibilityColumnAvailable ? `p.${AUTOMATIC_ELIGIBILITY}` : '0'} AS ${AUTOMATIC_ELIGIBILITY},
               d.timezone AS device_timezone,
               d.mode AS device_mode,
               d.status AS device_status,
@@ -172,7 +219,7 @@ async function selectById(connection, id) {
   return rows?.[0] ?? null;
 }
 
-function fromRow(row, device = {}) {
+function fromRow(row, device = {}, automaticEligibility = row?.[AUTOMATIC_ELIGIBILITY]) {
   if (!row) throw new Error('ingest row is required');
   const payload = parseJson(row.safe_payload);
   return Object.freeze({
@@ -201,6 +248,7 @@ function fromRow(row, device = {}) {
     captureId: row.capture_id ?? null,
     captureIndex: nullableNumber(row.capture_index),
     canonicalPayload: payload ? Object.freeze(payload) : null,
+    automaticFinalizationEligible: isOne(automaticEligibility),
     remoteAddress: row.source_ip ?? null,
     receivedAt: toIsoLike(row.received_at)
   });
@@ -247,4 +295,9 @@ function isDuplicateError(error) {
 
 async function safeRollback(connection) {
   try { await connection.rollback(); } catch {}
+}
+
+function isOne(value) { return value === 1 || value === '1'; }
+function eligibilityError(code) {
+  return Object.assign(new Error('Automatic finalization eligibility is unavailable or invalid'), { code });
 }

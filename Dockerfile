@@ -1,4 +1,4 @@
-# Explicit Railway modes: demo by default, or the SELECT-only database portal.
+# Explicit Railway modes: demo by default, read-only portal, authenticated ingest.
 FROM node:22-bookworm-slim
 
 WORKDIR /app

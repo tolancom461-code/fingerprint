@@ -140,6 +140,21 @@ test('destination backup includes its marker with UUID ordering but no numeric m
   assert.ok(f.state.calls.filter(call => call.sql.startsWith('SHOW')).every(call => call.sql.startsWith('SHOW CREATE TABLE `fingerprint`.')));
 });
 
+test('standalone destination explicitly backs up ten copied tables without changing source or fixture contracts', async () => {
+  const f = fixture();
+  const manifest = await f.run({ purpose: 'standalone-destination', schema: 'fingerprint', settleMs: 0 });
+  assert.equal(manifest.purpose, 'standalone-destination');
+  assert.equal(manifest.schema, 'fingerprint');
+  assert.deepEqual(manifest.tables.map(table => table.name), MIGRATION_TABLES);
+  assert.equal(manifest.tables.some(table => table.name === marker), false);
+  assert.equal(f.state.files.size, 10);
+  assert.ok(f.state.calls.every(call => /^(?:SELECT|SHOW CREATE TABLE)\b/.test(call.sql)));
+  assert.ok(f.state.calls.filter(call => call.sql.startsWith('SHOW')).every(call => call.sql.startsWith('SHOW CREATE TABLE `fingerprint`.')));
+  const invalid = fixture();
+  await assert.rejects(invalid.run({ purpose: 'standalone-destination', schema: 'test' }), safeFailure('INPUT_INVALID'));
+  assert.equal(invalid.state.calls.length, 0);
+});
+
 test('unsafe source targets and incomplete metadata fail before snapshot reads or private writes', async () => {
   for (const options of [{ schema: 'tolanhr' }, { purpose: 'destination' }, { schema: 'fingerprint' },
     { settleMs: -1 }, { waitFn: null }]) {

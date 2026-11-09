@@ -1,5 +1,5 @@
 export class AutomaticFinalizingPunchStore {
-  constructor({ punchStore, finalizationService, diagnosticLog, clock = () => new Date() }) {
+  constructor({ punchStore, finalizationService, diagnosticLog, clock = () => new Date(), requireDurableEligibility = false }) {
     if (!punchStore) throw new Error('punchStore is required');
     if (!finalizationService) throw new Error('finalizationService is required');
     if (!diagnosticLog) throw new Error('diagnosticLog is required');
@@ -7,6 +7,8 @@ export class AutomaticFinalizingPunchStore {
     this.finalizationService = finalizationService;
     this.diagnosticLog = diagnosticLog;
     this.clock = clock;
+    if (typeof requireDurableEligibility !== 'boolean') throw new TypeError('requireDurableEligibility must be a boolean');
+    this.requireDurableEligibility = requireDurableEligibility;
   }
 
   async init() {
@@ -14,8 +16,9 @@ export class AutomaticFinalizingPunchStore {
   }
 
   async putIfAbsent(punch) {
-    const result = await this.punchStore.putIfAbsent(punch, { createAutomaticFinalizationIntent: true });
-    if (result?.status !== 'inserted') return result;
+    const eligible = !this.requireDurableEligibility || punch?.automaticFinalizationEligible === true;
+    const result = await this.punchStore.putIfAbsent(punch, { createAutomaticFinalizationIntent: eligible });
+    if (!eligible || result?.status !== 'inserted') return result;
 
     const sourcePunchId = positiveIdOrNull(result.punchId);
     if (sourcePunchId == null) {

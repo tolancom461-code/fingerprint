@@ -67,7 +67,8 @@ if (config.storageMode === 'database') {
   ingestStore = new TiDbIngestStore({
     pool: databasePool,
     deviceStore,
-    replayLimit: config.database.replayLimit
+    replayLimit: config.database.replayLimit,
+    autoFinalizeNewCaptures: config.autoFinalizeNewPunches
   });
   punchStore = new TiDbPunchStore({
     pool: databasePool,
@@ -124,16 +125,17 @@ if (config.storageMode === 'database') {
 await ingestStore.init?.();
 await punchStore.init?.();
 
-// Startup replay intentionally uses the base canonical punch store. This preserves
-// the no-backfill gate: upgrading the service does not automatically finalize
-// historical durable ingest discovered during startup.
+// Startup replay uses the base canonical store: legacy raw captures cannot gain
+// automatic eligibility. Previously eligible captures can persist a pending intent
+// here; execution resumes through the automatic retry loop only when enabled.
 const replay = await replayDurableIngest({ ingestStore, punchStore, diagnosticLog });
 
 if (config.storageMode === 'database' && config.autoFinalizeNewPunches) {
   punchStore = new AutomaticFinalizingPunchStore({
     punchStore,
     finalizationService,
-    diagnosticLog
+    diagnosticLog,
+    requireDurableEligibility: true
   });
   automaticFinalizationActive = true;
 }

@@ -5,6 +5,7 @@
 !.env.portal.example
 !.env.readonly-test.example
 !.env.portal-database.example
+!.env.ingest.example
 var/
 service-logs/
 verification/

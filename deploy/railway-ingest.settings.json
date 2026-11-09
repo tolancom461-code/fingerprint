@@ -1,0 +1,18 @@
+{
+  "purpose": "Authenticated intake and protected receipt/device-user views on fingerprint",
+  "application": "manual-reference-only; Railway does not apply this file automatically",
+  "builder": "DOCKERFILE",
+  "dockerfilePath": "Dockerfile",
+  "startCommand": "node src/railway.js",
+  "healthcheckPath": "/ready",
+  "healthcheckTimeoutSeconds": 60,
+  "replicas": 1,
+  "domainTargetPort": 8080,
+  "variablesTemplate": ".env.ingest.example",
+  "mode": "database-ingest",
+  "machineAuthentication": "Authorization Bearer; independent of portal login",
+  "automaticFinalization": false,
+  "outboundDelivery": false,
+  "nativeDeviceCompatibilityProven": false,
+  "volume": "not required; ingest and canonical data are durable in TiDB"
+}

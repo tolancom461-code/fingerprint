@@ -10,6 +10,7 @@ node_modules/
 !.env.portal.example
 !.env.readonly-test.example
 !.env.portal-database.example
+!.env.ingest.example
 
 # Actual device data, delivery cursors, diagnostics and local evidence
 var/

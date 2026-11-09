@@ -149,7 +149,8 @@ test('container and npm commands select the dispatcher while the real portal CLI
   assert.equal(scripts['start:railway-staging'], 'node src/railway-staging.js');
   assert.equal(scripts.start, 'node src/index.js');
   const dispatcherImports = importsOf(dispatcher);
-  assert.deepEqual(dispatcherImports.sort(), ['./config/railway-mode.js', './portal-database.js', './railway-staging.js'].sort());
+  assert.deepEqual(dispatcherImports.sort(), ['./config/railway-mode.js', './cloud-ingest.js', './portal-database.js', './railway-staging.js'].sort());
+  assert.match(dispatcher, /if\s*\(mode === 'database-ingest'\)\s*await import\('\.\/cloud-ingest\.js'\)/);
   assert.match(dispatcher, /if\s*\(mode === 'database-readonly'\)\s*await import\('\.\/portal-database\.js'\)/);
   assert.deepEqual(importsOf(portalCli).sort(), ['./config/standalone-portal.js', './infrastructure/portal/read-only-runtime.js'].sort());
   for (const imported of [...dispatcherImports, ...importsOf(portalCli), ...importsOf(readRuntime)]) {

@@ -7,7 +7,7 @@ class MemoryLog {
   async write(item) { this.items.push(item); }
 }
 
-function setup({ storeResult = { status: 'inserted', punchId: '60002' }, finalizeResult, finalizeError } = {}) {
+function setup({ storeResult = { status: 'inserted', punchId: '60002' }, finalizeResult, finalizeError, requireDurableEligibility = false } = {}) {
   const calls = [];
   const log = new MemoryLog();
   const punchStore = {
@@ -27,7 +27,8 @@ function setup({ storeResult = { status: 'inserted', punchId: '60002' }, finaliz
     punchStore,
     finalizationService,
     diagnosticLog: log,
-    clock: () => new Date('2026-09-02T09:00:00.000Z')
+    clock: () => new Date('2026-09-02T09:00:00.000Z'),
+    requireDurableEligibility
   });
   return { wrapper, calls, log };
 }
@@ -82,4 +83,24 @@ test('missing inserted punch id fails closed for finalization without failing ca
   assert.equal(result.automaticFinalization.status, 'failed');
   assert.deepEqual(f.calls.map((x) => x.type), ['punch']);
   assert.equal(f.log.items[0].reason, 'inserted_punch_id_missing');
+});
+
+test('the runtime guard stores old or untrusted captures canonically without creating an intent or finalizing', async () => {
+  for (const automaticFinalizationEligible of [undefined, false, 0, 1, 'true', '1']) {
+    const f = setup({ requireDurableEligibility: true });
+    const result = await f.wrapper.putIfAbsent({ eventKey: 'old-raw', automaticFinalizationEligible,
+      vendorMetadata: { automaticFinalizationEligible: true } });
+    assert.equal(result.status, 'inserted');
+    assert.equal(result.automaticFinalization, undefined);
+    assert.deepEqual(f.calls.map(call => call.type), ['punch']);
+    assert.equal(f.calls[0].options.createAutomaticFinalizationIntent, false);
+  }
+});
+
+test('a trusted durable eligible capture gets an intent and immediate finalization under the runtime guard', async () => {
+  const f = setup({ requireDurableEligibility: true });
+  const result = await f.wrapper.putIfAbsent({ eventKey: 'new-raw', automaticFinalizationEligible: true });
+  assert.equal(result.automaticFinalization.status, 'final');
+  assert.equal(f.calls[0].options.createAutomaticFinalizationIntent, true);
+  assert.deepEqual(f.calls.map(call => call.type), ['punch', 'finalize']);
 });

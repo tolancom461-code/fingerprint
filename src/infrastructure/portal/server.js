@@ -5,6 +5,7 @@ import { stagingPortalConfig } from '../../config/staging-portal.js';
 import { createPortalAuth } from './auth.js';
 import { createDemoPortalService } from '../../application/demo-portal-service.js';
 import { createReadOnlyPortalService } from '../../application/read-only-portal-service.js';
+import { createIngestPortalService } from '../../application/ingest-portal-service.js';
 
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
 const assets = new Map([
@@ -25,12 +26,17 @@ export function createReadOnlyPortalHandler({ config, readStore }) {
   return createPortalHandler({ config, service: createReadOnlyPortalService({ readStore }), mode: 'database-readonly' });
 }
 
+export function createCloudIngestPortalHandler({ config, readStore }) {
+  return createPortalHandler({ config, service: createIngestPortalService({ readStore }), mode: 'database-ingest' });
+}
+
 function createPortalHandler({ config, service, mode }) {
   const auth = createPortalAuth(config);
   const expectedHost = new URL(config.origin).host.toLowerCase();
   const secure = config.origin.startsWith('https:');
   const sessionPayload = session => ({ ...session, mode,
-    capabilities: { createPerson: mode === 'demo' && session.user.role === 'admin' } });
+    capabilities: { createPerson: mode === 'demo' && session.user.role === 'admin',
+      ...(mode === 'database-ingest' ? { receivedRecords: true } : {}) } });
 
   return async function portalHandler(req, res) {
     const url = new URL(req.url || '/', config.origin);
@@ -85,6 +91,10 @@ function createPortalHandler({ config, service, mode }) {
             ['/api/portal/people', () => service.listPeople(filters)],
             ['/api/portal/events', () => service.listEvents(filters)]
           ]);
+          if (mode === 'database-ingest') {
+            reads.set('/api/portal/received-punches', () => service.listReceivedPunches(filters));
+            reads.set('/api/portal/device-users', () => service.listDeviceUsers(filters));
+          }
           if (reads.has(pathname)) {
             json(res, 200, await reads.get(pathname)());
             return true;

@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { TiDbPunchStore } from '../src/infrastructure/storage/tidb-punch-store.js';
 
 class FakeConnection {
-  constructor({ failPunch = false, failIntent = false } = {}) { this.failPunch = failPunch; this.failIntent = failIntent; this.calls = []; }
+  constructor({ failPunch = false, failIntent = false, duplicatePunch = false } = {}) {
+    this.failPunch = failPunch; this.failIntent = failIntent; this.duplicatePunch = duplicatePunch; this.calls = [];
+  }
   async beginTransaction() { this.calls.push({ type: 'begin' }); }
   async commit() { this.calls.push({ type: 'commit' }); }
   async rollback() { this.calls.push({ type: 'rollback' }); }
@@ -11,6 +13,7 @@ class FakeConnection {
   async execute(sql, params = []) {
     this.calls.push({ type: 'execute', sql, params });
     if (this.failPunch && sql.startsWith('INSERT INTO `biometric_svc_punches`')) throw new Error('storage failed');
+    if (this.duplicatePunch && sql.startsWith('INSERT INTO `biometric_svc_punches`')) throw Object.assign(new Error('duplicate'), { code: 'ER_DUP_ENTRY' });
     if (this.failIntent && sql.startsWith('INSERT INTO `biometric_svc_finalization_issues`')) throw new Error('intent storage failed');
     return [{ affectedRows: 1, insertId: 1 }];
   }
@@ -83,4 +86,29 @@ test('failure to persist automatic finalization intent rolls back canonical inse
   assert.equal(connection.calls.some((c) => c.type === 'rollback'), true);
   assert.equal(connection.calls.some((c) => c.type === 'commit'), false);
   assert.equal(pool.calls.some((c) => c.sql.includes("status = 'retry'")), true);
+});
+
+test('base storage preserves an eligible capture intent even without the automatic execution wrapper', async () => {
+  const connection = new FakeConnection();
+  const store = new TiDbPunchStore({ pool: new FakePool(connection) });
+  const result = await store.putIfAbsent({ ...punch(), automaticFinalizationEligible: true });
+  assert.equal(result.status, 'inserted');
+  const intent = connection.calls.find(call => call.sql?.startsWith('INSERT INTO `biometric_svc_finalization_issues`'));
+  assert.ok(intent);
+  assert.equal(intent.params[1], 'automatic_finalization_pending');
+  assert.ok(connection.calls.indexOf(intent) < connection.calls.findIndex(call => call.type === 'commit'));
+});
+
+test('an explicit false intent option overrides durable eligibility for a deliberate non-automatic operation', async () => {
+  const connection = new FakeConnection();
+  const store = new TiDbPunchStore({ pool: new FakePool(connection) });
+  await store.putIfAbsent({ ...punch(), automaticFinalizationEligible: true }, { createAutomaticFinalizationIntent: false });
+  assert.equal(connection.calls.some(call => call.sql?.startsWith('INSERT INTO `biometric_svc_finalization_issues`')), false);
+});
+
+test('a duplicate canonical punch never reopens an automatic intent even if its capture is eligible', async () => {
+  const connection = new FakeConnection({ duplicatePunch: true });
+  const store = new TiDbPunchStore({ pool: new FakePool(connection) });
+  assert.equal((await store.putIfAbsent({ ...punch(), automaticFinalizationEligible: true })).status, 'duplicate');
+  assert.equal(connection.calls.some(call => call.sql?.startsWith('INSERT INTO `biometric_svc_finalization_issues`')), false);
 });

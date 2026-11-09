@@ -150,6 +150,7 @@ test('TiDB replay converts device-local time to UTC and retires pre-cutover pend
   const pool = {
     async execute(sql, params = []) {
       calls.push({ sql, params });
+      if (sql.includes('information_schema.COLUMNS')) return [[]];
       if (sql.includes('SELECT i.*')) return [[row]];
       return [{ affectedRows: 1 }];
     }
@@ -160,4 +161,138 @@ test('TiDB replay converts device-local time to UTC and retires pre-cutover pend
   const retired = calls.find((call) => call.sql.includes("VALUES (?, 'not_applicable')"));
   assert.ok(retired);
   assert.deepEqual(retired.params, [31]);
+});
+
+const eligibilityColumn = { DATA_TYPE: 'tinyint', COLUMN_TYPE: 'tinyint unsigned', IS_NULLABLE: 'NO', COLUMN_DEFAULT: '0' };
+const eligibilityName = 'automatic_finalization_eligible';
+
+function eligibilityFixture({ enabled = true, duplicate = false, priorFlag = null, column = eligibilityColumn,
+  failProcessing = false, event: eventOverride = {}, device: deviceOverride = {} } = {}) {
+  const event = ingestEvent(eventOverride);
+  const row = { id: 21, device_id: 7, ingest_key: event.ingestKey, storage_identity_version: '1', vendor: event.vendor,
+    serial_number: event.serialNumber, event_family: event.eventFamily, vendor_event_type: event.vendorEventType,
+    dedupe_key: event.dedupeKey, dedupe_strategy: event.dedupeStrategy, dedupe_version: event.dedupeVersion,
+    wire_hash: event.wireHash, parser_version: event.parserVersion, parse_valid: event.parseValid ? 1 : 0,
+    safe_to_acknowledge: event.safeToAcknowledge ? 1 : 0, source_bytes: event.sourceBytes, source_field_count: event.sourceFieldCount,
+    safe_payload: event.canonicalPayload == null ? null : JSON.stringify(event.canonicalPayload), received_at: '2026-08-30 11:00:00',
+    device_timezone: 'Asia/Riyadh', device_mode: 'live', device_status: 'active', device_accept_events_from: null };
+  const calls = [];
+  const state = { flag: priorFlag, metadataReads: 0 };
+  const connection = {
+    async beginTransaction() { calls.push({ type: 'begin' }); },
+    async commit() { calls.push({ type: 'commit' }); },
+    async rollback() { calls.push({ type: 'rollback' }); state.flag = priorFlag; },
+    release() { calls.push({ type: 'release' }); },
+    async execute(sql, params = []) {
+      calls.push({ type: 'execute', sql, params });
+      if (sql.startsWith('INSERT INTO `biometric_svc_ingest_events`')) {
+        if (duplicate) throw Object.assign(new Error('duplicate'), { code: 'ER_DUP_ENTRY' });
+        return [{ insertId: 21, affectedRows: 1 }];
+      }
+      if (sql.startsWith('SELECT * FROM `biometric_svc_ingest_events`')) return [[row]];
+      if (sql.startsWith('INSERT INTO `biometric_svc_event_processing`')) {
+        if (failProcessing) throw new Error('processing eligibility unavailable');
+        if (state.flag === null) state.flag = params[2] ?? 0;
+        return [{ affectedRows: 1 }];
+      }
+      if (sql.startsWith(`SELECT ${eligibilityName}`)) return [[{ [eligibilityName]: state.flag }]];
+      return [{ affectedRows: 1 }];
+    }
+  };
+  const pool = {
+    async getConnection() { return connection; },
+    async execute(sql, params = []) {
+      calls.push({ type: 'pool', sql, params });
+      if (sql.includes('information_schema.COLUMNS')) { state.metadataReads++; return [column ? [column] : []]; }
+      if (sql.includes('SELECT i.*')) return [[{ ...row, [eligibilityName]: state.flag }]];
+      return [{ affectedRows: 1 }];
+    }
+  };
+  const store = new TiDbIngestStore({ pool, autoFinalizeNewCaptures: enabled,
+    deviceStore: { async observe() { return { id: 7, status: 'active', mode: 'live', timezone: 'Asia/Riyadh', accept_events_from: null, ...deviceOverride }; } } });
+  return { store, event, state, calls };
+}
+
+test('new safe eligible raw capture records automatic eligibility in the initial durable transaction', async () => {
+  const f = eligibilityFixture();
+  const result = await f.store.putIfAbsent(f.event);
+  assert.equal(result.status, 'inserted');
+  assert.equal(result.record.automaticFinalizationEligible, true);
+  assert.equal(f.state.flag, 1);
+  const processing = f.calls.find(call => call.sql?.startsWith('INSERT INTO `biometric_svc_event_processing`'));
+  assert.deepEqual(processing.params, [21, 'pending', 1]);
+  assert.match(processing.sql, /ON DUPLICATE KEY UPDATE ingest_event_id = VALUES\(ingest_event_id\)/);
+  assert.doesNotMatch(processing.sql.split('ON DUPLICATE KEY UPDATE')[1], /automatic_finalization_eligible/);
+  assert.ok(f.calls.indexOf(processing) < f.calls.findIndex(call => call.type === 'commit'));
+});
+
+test('old raw duplicates never gain eligibility, including a missing reconstructed processing row', async () => {
+  for (const priorFlag of [null, 0, '0']) {
+    const f = eligibilityFixture({ duplicate: true, priorFlag });
+    const result = await f.store.putIfAbsent(f.event);
+    assert.equal(result.status, 'duplicate');
+    assert.equal(result.record.automaticFinalizationEligible, false);
+    assert.equal(Number(f.state.flag), 0);
+    const processing = f.calls.find(call => call.sql?.startsWith('INSERT INTO `biometric_svc_event_processing`'));
+    assert.equal(processing.params[2], 0);
+  }
+});
+
+test('duplicates of previously eligible captures retain their durable eligibility while automatic execution is off', async () => {
+  const f = eligibilityFixture({ enabled: false, duplicate: true, priorFlag: 1 });
+  const result = await f.store.putIfAbsent(f.event);
+  assert.equal(result.record.automaticFinalizationEligible, true);
+  assert.equal(f.state.flag, 1);
+  assert.equal(f.calls.find(call => call.sql?.startsWith('INSERT INTO `biometric_svc_event_processing`')).params[2], 0);
+  const listed = await f.store.list();
+  assert.equal(listed[0].automaticFinalizationEligible, true);
+  assert.equal(f.state.metadataReads, 1);
+});
+
+test('a new capture is not automatically eligible when disabled, unsafe, invalid, missing payload or before the cutover', async () => {
+  const scenarios = [{ enabled: false }, { event: { safeToAcknowledge: false } }, { event: { parseValid: false } },
+    { event: { canonicalPayload: null } }, { device: { accept_events_from: '2026-08-30 12:00:00' } }];
+  for (const scenario of scenarios) {
+    const f = eligibilityFixture(scenario);
+    const result = await f.store.putIfAbsent(f.event);
+    assert.equal(result.record.automaticFinalizationEligible, false);
+    assert.equal(f.state.flag, 0);
+  }
+});
+
+test('automatic mode fails before capture if its optional eligibility schema is absent or incompatible', async () => {
+  for (const column of [null, { ...eligibilityColumn, COLUMN_TYPE: 'tinyint' },
+    { ...eligibilityColumn, IS_NULLABLE: 'YES' }, { ...eligibilityColumn, COLUMN_DEFAULT: null }]) {
+    const f = eligibilityFixture({ column });
+    await assert.rejects(f.store.putIfAbsent(f.event), error => /^AUTOMATIC_ELIGIBILITY_SCHEMA_/.test(error.code));
+    assert.equal(f.calls.some(call => call.type === 'begin'), false);
+  }
+});
+
+test('legacy automatic-off storage avoids references to the optional column when it is absent', async () => {
+  const f = eligibilityFixture({ enabled: false, column: null });
+  const result = await f.store.putIfAbsent(f.event);
+  assert.equal(result.record.automaticFinalizationEligible, false);
+  await f.store.list();
+  assert.equal(f.state.metadataReads, 1);
+  const processing = f.calls.find(call => call.sql?.startsWith('INSERT INTO `biometric_svc_event_processing`'));
+  assert.deepEqual(processing.params, [21, 'pending']);
+  assert.doesNotMatch(processing.sql, /automatic_finalization_eligible/);
+  const listing = f.calls.find(call => call.sql?.includes('SELECT i.*'));
+  assert.match(listing.sql, /0 AS automatic_finalization_eligible/);
+});
+
+test('failure to persist the initial eligibility rolls back raw capture and does not acknowledge it as durable', async () => {
+  const f = eligibilityFixture({ failProcessing: true });
+  await assert.rejects(f.store.putIfAbsent(f.event), /processing eligibility unavailable/);
+  assert.equal(f.calls.some(call => call.type === 'commit'), false);
+  assert.equal(f.calls.some(call => call.type === 'rollback'), true);
+});
+
+test('database eligibility is projected independently of any device-supplied canonical payload property', async () => {
+  const event = ingestEvent();
+  const f = eligibilityFixture({ duplicate: true, priorFlag: 0,
+    event: { canonicalPayload: { ...event.canonicalPayload, automaticFinalizationEligible: true } } });
+  assert.equal((await f.store.putIfAbsent(f.event)).record.automaticFinalizationEligible, false);
+  assert.equal((await f.store.list())[0].automaticFinalizationEligible, false);
 });

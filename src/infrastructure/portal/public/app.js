@@ -5,25 +5,35 @@ const descriptions = {
   overview: ['نظرة عامة', 'ملخص الأجهزة والأشخاص والحركات في مساحة التجربة.'],
   devices: ['الأجهزة', 'نماذج أجهزة تجريبية. لا يوجد جهاز حقيقي متصل بهذه البوابة.'],
   people: ['الأشخاص', 'عرض الأشخاص واختبار إدارة سجل تجريبي معزول.'],
-  events: ['الحركات', 'أمثلة دخول وخروج للعرض فقط، بتوقيت الرياض.']
+  events: ['الحركات', 'أمثلة دخول وخروج للعرض فقط، بتوقيت الرياض.'],
+  'received-punches': ['الحركات المستلمة', 'سجلات الاستقبال وحالة معالجتها.'],
+  'device-users': ['مستخدمو الأجهزة', 'هويات المستخدمين المرسلة من الأجهزة.']
 };
 const databaseDescriptions = {
   overview: ['نظرة عامة', 'ملخص الأجهزة والأشخاص والحركات النهائية المحفوظة في قاعدة نظام البصمة.'],
   devices: ['الأجهزة', 'الأجهزة المسجلة وآخر ملاحظة لها؛ وجود سجل لا يثبت الاتصال الحالي.'],
   people: ['الأشخاص', 'الأشخاص المسجلون في نظام البصمة، للعرض فقط.'],
-  events: ['الحركات النهائية', 'الحركات النهائية المحفوظة، بتوقيت الرياض. لا تشمل الحركات المعلقة.']
+  events: ['الحركات النهائية', 'الحركات النهائية المحفوظة، بتوقيت الرياض. لا تشمل الحركات المعلقة.'],
+  'received-punches': ['الحركات المستلمة', 'السجلات المحفوظة عند الاستقبال، بما فيها المعلقة وغير المرتبطة بشخص.'],
+  'device-users': ['مستخدمو الأجهزة', 'الهويات المسجلة من الأجهزة؛ ربطها بالأشخاص مستقل عن تسجيلها في الجهاز.']
 };
 const columns = {
   devices: ['الجهاز', 'الرقم التسلسلي', 'الطراز', 'حالة الاتصال', 'آخر اتصال'],
   people: ['الشخص', 'كود الشخص', 'الحالة'],
-  events: ['الشخص', 'نوع الحركة', 'التوقيت · الرياض', 'طريقة التحقق', 'الجهاز']
+  events: ['الشخص', 'نوع الحركة', 'التوقيت · الرياض', 'طريقة التحقق', 'الجهاز'],
+  'received-punches': ['رقم المستخدم في الجهاز', 'وقت الحركة', 'الجهاز', 'المعالجة', 'حدث نهائي'],
+  'device-users': ['المستخدم', 'رقمه في الجهاز', 'الجهاز', 'الشخص المرتبط', 'آخر ملاحظة']
 };
 const numbers = new Intl.NumberFormat('ar-SA');
 const dates = new Intl.DateTimeFormat('ar-SA-u-ca-gregory', { timeZone: 'Asia/Riyadh', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-const state = { session: null, view: 'overview', pending: false, request: 0, list: null, searches: { devices: '', people: '', events: '' }, pages: { devices: 1, people: 1, events: 1 } };
+const state = { session: null, view: 'overview', pending: false, request: 0, list: null, searches: { devices: '', people: '', events: '', 'received-punches': '', 'device-users': '' }, pages: { devices: 1, people: 1, events: 1, 'received-punches': 1, 'device-users': 1 } };
 let searchTimer;
 
 function isDemo() { return (state.session?.mode ?? document.body.dataset.portalMode) === 'demo'; }
+function hasReceivedRecords() { return state.session?.capabilities?.receivedRecords === true; }
+function allowedView(view) {
+  return Object.hasOwn(descriptions, view) && (!['received-punches', 'device-users'].includes(view) || hasReceivedRecords());
+}
 function canCreatePerson() {
   return state.session?.capabilities?.createPerson === true && state.session?.user.role === 'admin' && state.session?.mode === 'demo';
 }
@@ -44,6 +54,7 @@ function applyPortalMode() {
     statDevicesDescription: 'سجلات الأجهزة، وليست عدد الأجهزة المتصلة',
     statPeopleDescription: 'الأشخاص المسجلون في قاعدة الخدمة',
     statEventsLabel: 'الحركات النهائية',
+    navEventsLabel: 'الحركات النهائية',
     statEventsDescription: 'حركات نهائية محفوظة؛ لا تشمل الحركات المعلقة',
     deviceConnectionStatus: 'غير مؤكدة',
     deviceConnectionDescription: 'هذه القراءة لا تختبر اتصال الأجهزة الحالي',
@@ -63,6 +74,23 @@ function applyPortalMode() {
   $('searchInput').maxLength = 100;
   $('addPersonDialog').hidden = true;
   $('addPersonForm').inert = true;
+  document.querySelectorAll('[data-ingest-only]').forEach(node => { node.hidden = !hasReceivedRecords(); });
+  $('statsGrid').classList.toggle('ingest-stats', hasReceivedRecords());
+  if (hasReceivedRecords()) {
+    for (const [id, text] of Object.entries({
+      sidebarModeName: 'استقبال محمي',
+      sidebarModeDescription: 'استقبال الحركات وعرض السجلات المحفوظة.',
+      bannerTitle: 'استقبال الحركات ومتابعتها',
+      bannerDescription: 'تظهر السجلات المستلمة هنا قبل اعتمادها كحركات نهائية. تظل حالة اتصال الجهاز غير مؤكدة حتى الاختبار الفعلي.',
+      bannerBadge: 'استقبال محمي',
+      deviceReception: 'مفعّل للطلبات المصادق عليها',
+      deliveryState: 'الإرسال إلى البرامج الأخرى معطّل',
+      systemPanelTitle: 'حالة الاستقبال والعرض',
+      databaseLabel: 'حفظ الحركات',
+      databaseState: 'مفعّل عبر قناة الاستقبال',
+      systemPanelDescription: 'حالة الخدمة لا تعني أن الجهاز متصل حاليًا.'
+    })) $(id).textContent = text;
+  }
 }
 
 function element(tag, text, className) {
@@ -108,7 +136,7 @@ function connectionError(error) {
 
 function viewFromHash() {
   const view = window.location.hash.slice(1);
-  return Object.hasOwn(descriptions, view) ? view : 'overview';
+  return allowedView(view) ? view : 'overview';
 }
 
 function toggleMenu(open) {
@@ -119,7 +147,7 @@ function toggleMenu(open) {
 }
 
 function setView(view) {
-  if (!Object.hasOwn(descriptions, view)) return;
+  if (!allowedView(view)) return;
   clearTimeout(searchTimer);
   state.view = view;
   state.list = null;
@@ -204,6 +232,13 @@ function updateCounts(counts) {
     $(stat).textContent = numbers.format(value);
     $(nav).textContent = numbers.format(value);
   }
+  if (hasReceivedRecords()) {
+    for (const [name, stat, nav] of [['received', 'statReceived', 'navReceivedCount'], ['deviceUsers', 'statDeviceUsers', 'navDeviceUsersCount']]) {
+      const value = Math.max(0, Number(counts[name]) || 0);
+      $(stat).textContent = numbers.format(value);
+      $(nav).textContent = numbers.format(value);
+    }
+  }
 }
 
 function renderEmpty(title = 'لا توجد نتائج', detail = 'جرّب البحث بكلمة أخرى أو امسح البحث لعرض القائمة.') {
@@ -237,7 +272,7 @@ function renderList(view, data) {
   const total = Math.max(0, Number(data.page?.total) || 0);
   const nouns = isDemo()
     ? { devices: 'جهاز تجريبي', people: 'شخص في مساحة التجربة', events: 'حركة تجريبية' }
-    : { devices: 'جهاز مسجل', people: 'شخص مسجل', events: 'حركة نهائية' };
+    : { devices: 'جهاز مسجل', people: 'شخص مسجل', events: 'حركة نهائية', 'received-punches': 'سجل استقبال', 'device-users': 'مستخدم جهاز' };
   $('listTotal').textContent = `${numbers.format(total)} ${nouns[view]}`;
   if (!items.length) renderEmpty();
   for (const item of items) {
@@ -256,6 +291,19 @@ function renderList(view, data) {
       cell(row, item.displayName || '—', 'cell-primary');
       cell(row, item.personCode || '—', 'cell-code');
       cell(row).append(badge(item.status === 'active' ? (isDemo() ? 'نشط في التجربة' : 'نشط') : 'غير نشط', item.status === 'active' ? 'badge-success' : 'badge-neutral'));
+    } else if (view === 'received-punches') {
+      cell(row, item.deviceUserId || 'غير مقروء', 'cell-code');
+      cell(row, item.eventTimeUtc ? localTime(item.eventTimeUtc) : item.eventTimeLocal ? `وقت الجهاز: ${item.eventTimeLocal}` : 'وقت الجهاز غير متاح');
+      cell(row, item.deviceName || '—');
+      const statuses = { pending: 'بانتظار المعالجة', processing: 'تجري المعالجة', processed: 'محفوظة', retry: 'إعادة محاولة', not_applicable: 'تحتاج مراجعة' };
+      cell(row).append(badge(item.parseValid ? statuses[item.processingStatus] || 'تحتاج مراجعة' : 'صيغة غير معتمدة'));
+      cell(row).append(badge(item.hasFinalEvent ? 'محفوظ' : 'لم يُنشأ', item.hasFinalEvent ? 'badge-success' : 'badge-neutral'));
+    } else if (view === 'device-users') {
+      cell(row, item.displayName || 'بلا اسم', 'cell-primary');
+      cell(row, item.deviceUserId || '—', 'cell-code');
+      cell(row, item.deviceName || '—');
+      cell(row, item.mappedPersonName || item.mappedPersonCode || 'غير مرتبط');
+      cell(row, item.lastSeenAt ? localTime(item.lastSeenAt) : 'غير متاح');
     } else {
       const person = cell(row);
       const stack = element('span', undefined, 'cell-stack');
@@ -271,7 +319,7 @@ function renderList(view, data) {
     }
     $('tableBody').append(row);
   }
-  const nav = { devices: 'navDevicesCount', people: 'navPeopleCount', events: 'navEventsCount' }[view];
+  const nav = { devices: 'navDevicesCount', people: 'navPeopleCount', events: 'navEventsCount', 'received-punches': 'navReceivedCount', 'device-users': 'navDeviceUsersCount' }[view];
   if (!state.searches[view]) $(nav).textContent = numbers.format(total);
   updatePagination(data.page);
 }
@@ -375,5 +423,5 @@ async function initializeSession() {
   }
 }
 
-if (document.body.dataset.portalMode === 'database-readonly') applyPortalMode();
+if (['database-readonly', 'database-ingest'].includes(document.body.dataset.portalMode)) applyPortalMode();
 initializeSession();
