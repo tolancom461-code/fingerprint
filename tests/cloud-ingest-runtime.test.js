@@ -52,11 +52,12 @@ function configuration(port) {
     retrySweepSeconds: 1, retryDelaySeconds: 1, replayLimit: 1000,
     adms: { delaySeconds: 10, errorDelaySeconds: 60, realtime: 1, encrypt: 0 } };
 }
-async function start(t, { includeViewer = false, retrySweepSeconds = 1 } = {}) {
+async function start(t, { includeViewer = false, retrySweepSeconds = 1, basicCredentials } = {}) {
   const fixture = fakeDatabase();
   const logs = [];
   const config = configuration(await freePort());
   config.retrySweepSeconds = retrySweepSeconds;
+  if (basicCredentials !== undefined) config.basicCredentials = basicCredentials;
   if (includeViewer) config.portal.users.push({ username: 'test-viewer', passwordHash, role: 'viewer' });
   const runtime = await startCloudIngest({ config, openDatabase: async settings => {
     assert.equal(settings, config.database); return fixture.database;
@@ -65,6 +66,7 @@ async function start(t, { includeViewer = false, retrySweepSeconds = 1 } = {}) {
   return { ...fixture, logs, config, runtime, base: config.portal.origin };
 }
 function writes(state) { return state.calls.filter(call => !/^\s*SELECT\b/.test(call.sql)); }
+function basicAuthorization(username, value) { return `Basic ${Buffer.from(`${username}:${value}`, 'ascii').toString('base64')}`; }
 async function login(lab, username = 'test-admin') {
   const response = await fetch(lab.base + '/auth/login', { method: 'POST',
     headers: { Origin: lab.base, 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
@@ -221,4 +223,103 @@ test('connection diagnostics are admin-only, bounded metadata and never admit an
   assert.equal(logout.status, 200); await logout.text();
   const afterLogout = await fetch(lab.base + route, { headers });
   assert.equal(afterLogout.status, 401); await afterLogout.text();
+});
+
+test('Basic authentication stays disabled by default even when its header contains strong credentials and an allowed serial', async t => {
+  const lab = await start(t, { retrySweepSeconds: 3600 });
+  const callsBefore = lab.state.calls.length;
+  const response = await fetch(lab.base + '/iclock/cdata?SN=TEST-DEVICE', {
+    headers: { Authorization: basicAuthorization('fixture-native', 'N'.repeat(48)) } });
+  assert.equal(response.status, 401);
+  assert.equal(response.headers.get('www-authenticate'), 'Bearer');
+  assert.equal(await response.text(), 'UNAUTHENTICATED');
+  assert.equal(lab.state.calls.length, callsBefore);
+  assert.deepEqual(writes(lab.state), []);
+});
+
+test('configured native Basic reaches the device allowlist, keeps Bearer working and does not grant portal access', async t => {
+  const basicCredentials = { username: 'fixture-native', password: 'N'.repeat(48) };
+  const machineHeader = { Authorization: basicAuthorization(basicCredentials.username, basicCredentials.password) };
+  const lab = await start(t, { basicCredentials, retrySweepSeconds: 3600 });
+  const unknown = await fetch(lab.base + '/iclock/cdata?SN=UNKNOWN', { headers: machineHeader });
+  assert.equal(unknown.status, 403);
+  assert.equal(await unknown.text(), 'DENIED');
+  assert.deepEqual(writes(lab.state), []);
+  const known = await fetch(lab.base + '/iclock/cdata?SN=TEST-DEVICE', { headers: machineHeader });
+  assert.equal(known.status, 200);
+  assert.match(await known.text(), /GET OPTION FROM: TEST-DEVICE/);
+  assert.ok(writes(lab.state).some(call => call.sql.includes('biometric_svc_devices')));
+  const bearer = await fetch(lab.base + '/iclock/getrequest?SN=TEST-DEVICE', {
+    headers: { Authorization: `Bearer ${token}` } });
+  assert.equal(bearer.status, 200);
+  assert.equal(await bearer.text(), 'OK');
+  for (const route of ['/api/portal/overview', '/api/portal/received-punches', '/api/portal/device-connection-diagnostics']) {
+    const response = await fetch(lab.base + route, { headers: machineHeader });
+    assert.equal(response.status, 401);
+    assert.equal((await response.json()).error, 'UNAUTHENTICATED');
+  }
+  const rejectedPortalLogin = await fetch(lab.base + '/auth/login', { method: 'POST',
+    headers: { Origin: lab.base, 'Content-Type': 'application/json' },
+    body: JSON.stringify(basicCredentials) });
+  assert.equal(rejectedPortalLogin.status, 401);
+  await rejectedPortalLogin.text();
+  const session = await login(lab);
+  const overview = await fetch(lab.base + '/api/portal/overview', { headers: { Cookie: session.cookie } });
+  assert.equal(overview.status, 200); await overview.text();
+  const output = JSON.stringify(lab.logs);
+  for (const value of [basicCredentials.username, basicCredentials.password, machineHeader.Authorization, token, 'TEST-DEVICE', 'UNKNOWN']) {
+    assert.equal(output.includes(value), false);
+  }
+});
+
+test('p:p and other rejected Basic attempts cannot observe the device or open an ATTLOG transaction', async t => {
+  const basicCredentials = { username: 'fixture-native', password: 'N'.repeat(48) };
+  const lab = await start(t, { basicCredentials, retrySweepSeconds: 3600 });
+  const callsBefore = lab.state.calls.length;
+  for (const method of ['GET', 'POST']) {
+    for (const headers of [
+      { Authorization: basicAuthorization('p', 'p') },
+      { Authorization: basicAuthorization(basicCredentials.username, 'X'.repeat(48)) },
+      { Cookie: `username=${basicCredentials.username}; password=${basicCredentials.password}` }
+    ]) {
+      const response = await fetch(lab.base + `/iclock/cdata?SN=TEST-DEVICE&table=ATTLOG&username=${basicCredentials.username}&password=${basicCredentials.password}`, {
+        method, headers, ...(method === 'POST' ? { body: privateText } : {}) });
+      assert.equal(response.status, 401);
+      assert.match(response.headers.get('www-authenticate'), /Basic realm="biometric-ingest"/);
+      assert.equal(await response.text(), 'UNAUTHENTICATED');
+    }
+  }
+  assert.equal(lab.state.calls.length, callsBefore);
+  assert.deepEqual(writes(lab.state), []);
+  const session = await login(lab);
+  const response = await fetch(lab.base + '/api/portal/device-connection-diagnostics', { headers: { Cookie: session.cookie } });
+  assert.equal(response.status, 200);
+  const diagnostics = await response.json();
+  assert.equal(diagnostics.authenticated, false);
+  assert.equal(diagnostics.recent.length, 6);
+  const output = JSON.stringify({ diagnostics, logs: lab.logs });
+  for (const value of [basicCredentials.username, basicCredentials.password, privateText,
+    basicAuthorization('p', 'p'), 'TEST-DEVICE']) assert.equal(output.includes(value), false);
+});
+
+test('invalid Basic runtime configuration fails before the database factory is called', async () => {
+  let databaseOpenCalls = 0;
+  for (const basicCredentials of [
+    'not-a-credential-object', [], {},
+    { username: 'p', password: 'p' },
+    { username: 'private-runtime-device' },
+    { password: 'N'.repeat(48) },
+    { username: 'private-runtime-device', password: undefined },
+    { username: 'private-runtime-device', password: '' }
+  ]) {
+    await assert.rejects(startCloudIngest({ config: { ...configuration(0), basicCredentials },
+      openDatabase: async () => { databaseOpenCalls++; throw new Error('The database must not be opened'); },
+      diagnosticLog: { async write() {} } }), error => {
+      assert.equal(error.code, 'CLOUD_INGEST_START_FAILED');
+      assert.equal(error.cause, undefined);
+      for (const value of ['private-runtime-device', 'N'.repeat(48)]) assert.equal(String(error.stack).includes(value), false);
+      return true;
+    });
+  }
+  assert.equal(databaseOpenCalls, 0);
 });

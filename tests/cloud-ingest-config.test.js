@@ -23,6 +23,7 @@ test('cloud ingest explicitly selects fingerprint and a distinct writer with aut
   assert.equal(config.database.sslMode, 'required');
   assert.equal(config.autoFinalizeNewPunches, false);
   assert.equal(config.token, token);
+  assert.equal(config.basicCredentials, null);
   assert.deepEqual(config.allowedDevices, ['zkteco:FIXTURE-1']);
   assert.equal(config.port, 8080);
   for (const value of [config, config.database, config.portal, config.allowedDevices, config.adms]) assert.ok(Object.isFrozen(value));
@@ -54,4 +55,70 @@ test('authentication, allowlist, remote TLS and safe intake bounds fail closed',
   const local = loadCloudIngestConfig({ ...environment(), BIOMETRIC_INGEST_DB_HOST: '127.0.0.1', BIOMETRIC_INGEST_DB_SSL_MODE: 'disabled',
     BIOMETRIC_PORTAL_ORIGIN: 'http://127.0.0.1:8080' });
   assert.equal(local.database.sslMode, 'disabled');
+});
+
+test('native Basic credentials are optional, explicit machine credentials and preserve the existing cloud defaults', () => {
+  const username = 'fixture.device-1';
+  const password = 'B'.repeat(48);
+  const config = loadCloudIngestConfig({ ...environment(),
+    BIOMETRIC_INGEST_BASIC_USERNAME: username, BIOMETRIC_INGEST_BASIC_PASSWORD: password });
+  assert.deepEqual(config.basicCredentials, { username, password });
+  assert.ok(Object.isFrozen(config.basicCredentials));
+  assert.equal(config.token, token);
+  assert.equal(config.autoFinalizeNewPunches, false);
+  assert.equal(config.database.database, 'fingerprint');
+  assert.equal(config.portal.users[0].username, 'fixture-admin');
+  const minimum = loadCloudIngestConfig({ ...environment(),
+    BIOMETRIC_INGEST_BASIC_USERNAME: 'p', BIOMETRIC_INGEST_BASIC_PASSWORD: 'B'.repeat(32) });
+  assert.equal(minimum.basicCredentials.password.length, 32);
+});
+
+test('partial or blank Basic configuration fails closed and never reports configured credential values', () => {
+  const secret = 'PRIVATE_CONFIG_SECRET_' + 'X'.repeat(32);
+  const username = 'private-device';
+  for (const changes of [
+    { BIOMETRIC_INGEST_BASIC_USERNAME: username },
+    { BIOMETRIC_INGEST_BASIC_PASSWORD: secret },
+    { BIOMETRIC_INGEST_BASIC_USERNAME: username, BIOMETRIC_INGEST_BASIC_PASSWORD: '' },
+    { BIOMETRIC_INGEST_BASIC_USERNAME: '', BIOMETRIC_INGEST_BASIC_PASSWORD: secret },
+    { BIOMETRIC_INGEST_BASIC_USERNAME: '', BIOMETRIC_INGEST_BASIC_PASSWORD: '' },
+    { BIOMETRIC_INGEST_BASIC_USERNAME: undefined },
+    { BIOMETRIC_INGEST_BASIC_PASSWORD: undefined }
+  ]) {
+    assert.throws(() => loadCloudIngestConfig({ ...environment(), ...changes }), error => {
+      assert.equal(error.code, 'CLOUD_INGEST_CONFIG_INVALID');
+      assert.equal(error.message, 'Invalid cloud ingest configuration');
+      assert.equal(error.cause, undefined);
+      for (const value of [username, secret]) assert.equal(String(error.stack).includes(value), false);
+      return true;
+    });
+  }
+});
+
+test('weak, non-ASCII and URI-delimiter Basic credentials are rejected instead of normalized or accepted', () => {
+  const valid = { BIOMETRIC_INGEST_BASIC_USERNAME: 'fixture-device', BIOMETRIC_INGEST_BASIC_PASSWORD: 'B'.repeat(48) };
+  for (const changes of [
+    { BIOMETRIC_INGEST_BASIC_USERNAME: 'p', BIOMETRIC_INGEST_BASIC_PASSWORD: 'p' },
+    { BIOMETRIC_INGEST_BASIC_PASSWORD: 'B'.repeat(31) },
+    { BIOMETRIC_INGEST_BASIC_PASSWORD: 'B'.repeat(129) },
+    { BIOMETRIC_INGEST_BASIC_USERNAME: 'device:other' },
+    { BIOMETRIC_INGEST_BASIC_USERNAME: 'device@example' },
+    { BIOMETRIC_INGEST_BASIC_USERNAME: ' device' },
+    { BIOMETRIC_INGEST_BASIC_USERNAME: 'جهاز' },
+    { BIOMETRIC_INGEST_BASIC_PASSWORD: 'B'.repeat(32) + '%2F' },
+    { BIOMETRIC_INGEST_BASIC_PASSWORD: 'B'.repeat(32) + '\n' },
+    { BIOMETRIC_INGEST_BASIC_PASSWORD: null }
+  ]) rejects({ ...valid, ...changes });
+});
+
+test('portal, staging, database and generic Basic values cannot fill either machine Basic field', () => {
+  const password = 'B'.repeat(48);
+  const aliases = { BIOMETRIC_PORTAL_ADMIN_USERNAME: 'portal-device',
+    BIOMETRIC_STAGING_ADMIN_USERNAME: 'staging-device', BIOMETRIC_STAGING_ADMIN_PASSWORD: password,
+    BIOMETRIC_INGEST_DB_USER: 'fixture.database-device', BIOMETRIC_INGEST_DB_PASSWORD: password,
+    BIOMETRIC_BASIC_USERNAME: 'generic-device', BIOMETRIC_BASIC_PASSWORD: password };
+  const config = loadCloudIngestConfig({ ...environment(), ...aliases });
+  assert.equal(config.basicCredentials, null);
+  rejects({ ...aliases, BIOMETRIC_INGEST_BASIC_USERNAME: 'fixture-device' });
+  rejects({ ...aliases, BIOMETRIC_INGEST_BASIC_PASSWORD: password });
 });

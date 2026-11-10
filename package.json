@@ -17,6 +17,7 @@
     "verify:portal-mysql": "node scripts/verify-test-portal-mysql.mjs",
     "verify:ingest-mysql": "node scripts/verify-standalone-ingest-mysql.mjs",
     "verify:cloud-ingest-mysql": "node scripts/verify-cloud-ingest-mysql.mjs",
+    "prepare:native-basic": "node scripts/prepare-native-basic-deployment.mjs",
     "admin:password-hash": "node scripts/hash-admin-password.mjs",
     "dev": "node --watch src/index.js",
     "test": "node --test tests/*.test.js",

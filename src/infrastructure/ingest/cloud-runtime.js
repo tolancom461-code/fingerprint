@@ -17,6 +17,7 @@ import { createHttpServer } from '../http/server.js';
 import { createCloudIngestPortalHandler } from '../portal/server.js';
 import { createAuthenticatedRegistry } from './authenticated-registry.js';
 import { createDeviceConnectionDiagnostics } from './device-connection-diagnostics.js';
+import { normalizeBasicMachineCredentials } from './basic-machine-credentials.js';
 
 const defaultLog = Object.freeze({ async write(entry) { process.stdout.write(JSON.stringify(entry) + '\n'); } });
 const LOG_TYPES = new Set([
@@ -41,7 +42,7 @@ export async function startCloudIngest({ config, openDatabase = createIngestData
   let finalizationRetryLoop;
   const log = sanitizedLog(diagnosticLog);
   try {
-    validateRuntimeConfig(config);
+    const basicCredentials = validateRuntimeConfig(config);
     database = await openDatabase(config.database);
     await database.checkReady();
     const deviceRegistry = new EnvDeviceRegistry(config.allowedDevices);
@@ -62,7 +63,8 @@ export async function startCloudIngest({ config, openDatabase = createIngestData
     const adapter = new ZktecoAdmsAdapter({ config: { adms: config.adms, maxBodyBytes: config.maxBodyBytes, attlogAckMode: 'ack' },
       deviceRegistry, receivePunchBatch, diagnosticLog: log, deviceStore });
     const registry = createAuthenticatedRegistry({ registry: new VendorAdapterRegistry([adapter]), token: config.token,
-      diagnosticLog: log, rejectedRequestObserver: req => connectionDiagnostics.recordRejectedRequest(req) });
+      basicCredentials, diagnosticLog: log,
+      rejectedRequestObserver: req => connectionDiagnostics.recordRejectedRequest(req) });
     const portal = createCloudIngestPortalHandler({ config: config.portal, readStore: new TiDbIngestReadStore(database),
       connectionDiagnostics });
     server = createHttpServer({ adapterRegistry: registry, diagnosticLog: log,
@@ -147,4 +149,5 @@ function validateRuntimeConfig(config) {
       !Number.isInteger(config.replayLimit) || config.replayLimit < 1 || config.replayLimit > 10000 || !config.adms) {
     throw new Error('Invalid cloud ingest runtime configuration');
   }
+  return normalizeBasicMachineCredentials(config.basicCredentials);
 }

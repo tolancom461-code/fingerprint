@@ -1,4 +1,5 @@
 import { portalAccountsConfig } from './portal-accounts.js';
+import { normalizeBasicMachineCredentials } from '../infrastructure/ingest/basic-machine-credentials.js';
 
 export function loadCloudIngestConfig(env = process.env) {
   const host = env.BIOMETRIC_INGEST_HOST ?? '0.0.0.0';
@@ -21,7 +22,14 @@ export function loadCloudIngestConfig(env = process.env) {
   // Finalization is a later, deliberate activation after history reconciliation.
   if (env.BIOMETRIC_INGEST_AUTO_FINALIZE_NEW_PUNCHES !== undefined && env.BIOMETRIC_INGEST_AUTO_FINALIZE_NEW_PUNCHES !== 'false') throw invalid();
   let portal;
+  let basicCredentials = null;
   try {
+    if (Object.hasOwn(env, 'BIOMETRIC_INGEST_BASIC_USERNAME') || Object.hasOwn(env, 'BIOMETRIC_INGEST_BASIC_PASSWORD')) {
+      basicCredentials = normalizeBasicMachineCredentials({
+        username: env.BIOMETRIC_INGEST_BASIC_USERNAME,
+        password: env.BIOMETRIC_INGEST_BASIC_PASSWORD
+      });
+    }
     portal = portalAccountsConfig({ origin: env.BIOMETRIC_PORTAL_ORIGIN,
       adminUsername: env.BIOMETRIC_PORTAL_ADMIN_USERNAME,
       adminPasswordHash: env.BIOMETRIC_PORTAL_ADMIN_PASSWORD_HASH,
@@ -29,7 +37,7 @@ export function loadCloudIngestConfig(env = process.env) {
       viewerPasswordHash: env.BIOMETRIC_PORTAL_VIEWER_PASSWORD_HASH });
   } catch { throw invalid(); }
   return Object.freeze({ host, port: integer(env.PORT, 8080, 1, 65535), portal,
-    token, allowedDevices: Object.freeze(allowedDevices),
+    token, basicCredentials, allowedDevices: Object.freeze(allowedDevices),
     maxBodyBytes: integer(env.BIOMETRIC_INGEST_MAX_BODY_BYTES, 524288, 1024, 524288),
     autoFinalizeNewPunches: false,
     retrySweepSeconds: integer(env.BIOMETRIC_INGEST_RETRY_SWEEP_SECONDS, 2, 1, 3600),
