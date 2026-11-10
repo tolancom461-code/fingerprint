@@ -6,10 +6,11 @@ import { createHttpServer } from '../src/infrastructure/http/server.js';
 
 const token = 'a'.repeat(64);
 
-async function start(t) {
+async function start(t, rejectedRequestObserver = null) {
   const calls = [];
   const logs = [];
-  const registry = createAuthenticatedRegistry({ token, diagnosticLog: { async write(entry) { logs.push(entry); } },
+  const registry = createAuthenticatedRegistry({ token, rejectedRequestObserver,
+    diagnosticLog: { async write(entry) { logs.push(entry); } },
     registry: { match(req) { calls.push(['match', req.method]); return { async handle(req, res) {
       calls.push(['handle', req.method]); req.resume(); res.end('MACHINE_OK');
     } }; }, listVendors() { return ['zkteco']; } } });
@@ -64,4 +65,21 @@ test('duplicate Authorization headers are rejected even if one carries the corre
   });
   assert.equal(response.status, 401);
   assert.deepEqual(lab.calls, []);
+});
+
+test('rejection observers see rejected attempts only and cannot change the authentication decision', async t => {
+  let observed = 0;
+  const lab = await start(t, () => { observed++; throw new Error('PRIVATE_DIAGNOSTIC_FAILURE' + token); });
+  const rejected = await fetch(lab.base + '/iclock/cdata?SN=TEST', { method: 'POST', body: 'PRIVATE_BODY' });
+  assert.equal(rejected.status, 401);
+  assert.equal(await rejected.text(), 'UNAUTHENTICATED');
+  assert.equal(observed, 1);
+  assert.deepEqual(lab.calls, []);
+  const accepted = await fetch(lab.base + '/iclock/getrequest?SN=TEST', { headers: { Authorization: `Bearer ${token}` } });
+  assert.equal(accepted.status, 200);
+  assert.equal(await accepted.text(), 'MACHINE_OK');
+  assert.equal(observed, 1);
+  assert.equal(JSON.stringify(lab.logs).includes('PRIVATE_DIAGNOSTIC_FAILURE'), false);
+  assert.throws(() => createAuthenticatedRegistry({ token, registry: { match() {} }, rejectedRequestObserver: {} }),
+    { code: 'INGEST_AUTH_CONFIG_INVALID' });
 });

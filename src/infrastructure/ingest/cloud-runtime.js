@@ -16,6 +16,7 @@ import { ZktecoAdmsAdapter } from '../vendors/zkteco/http-adapter.js';
 import { createHttpServer } from '../http/server.js';
 import { createCloudIngestPortalHandler } from '../portal/server.js';
 import { createAuthenticatedRegistry } from './authenticated-registry.js';
+import { createDeviceConnectionDiagnostics } from './device-connection-diagnostics.js';
 
 const defaultLog = Object.freeze({ async write(entry) { process.stdout.write(JSON.stringify(entry) + '\n'); } });
 const LOG_TYPES = new Set([
@@ -44,6 +45,7 @@ export async function startCloudIngest({ config, openDatabase = createIngestData
     database = await openDatabase(config.database);
     await database.checkReady();
     const deviceRegistry = new EnvDeviceRegistry(config.allowedDevices);
+    const connectionDiagnostics = createDeviceConnectionDiagnostics({ allowedDevices: config.allowedDevices });
     const deviceStore = new TiDbDeviceStore(database);
     const ingestStore = new TiDbIngestStore({ pool: database, deviceStore, replayLimit: config.replayLimit,
       autoFinalizeNewCaptures: config.autoFinalizeNewPunches });
@@ -60,8 +62,9 @@ export async function startCloudIngest({ config, openDatabase = createIngestData
     const adapter = new ZktecoAdmsAdapter({ config: { adms: config.adms, maxBodyBytes: config.maxBodyBytes, attlogAckMode: 'ack' },
       deviceRegistry, receivePunchBatch, diagnosticLog: log, deviceStore });
     const registry = createAuthenticatedRegistry({ registry: new VendorAdapterRegistry([adapter]), token: config.token,
-      diagnosticLog: log });
-    const portal = createCloudIngestPortalHandler({ config: config.portal, readStore: new TiDbIngestReadStore(database) });
+      diagnosticLog: log, rejectedRequestObserver: req => connectionDiagnostics.recordRejectedRequest(req) });
+    const portal = createCloudIngestPortalHandler({ config: config.portal, readStore: new TiDbIngestReadStore(database),
+      connectionDiagnostics });
     server = createHttpServer({ adapterRegistry: registry, diagnosticLog: log,
       portalHandler: async (req, res) => {
         const pathname = new URL(req.url || '/', config.portal.origin).pathname;

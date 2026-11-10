@@ -5,8 +5,9 @@ const MACHINE_TOKEN = /^[A-Za-z0-9_-]{43,128}$/;
 
 // Only this machine credential authenticates ADMS requests. A portal session,
 // query parameter or device serial number cannot substitute for the header.
-export function createAuthenticatedRegistry({ registry, token, diagnosticLog }) {
-  if (!registry || typeof registry.match !== 'function' || typeof token !== 'string' || !MACHINE_TOKEN.test(token)) {
+export function createAuthenticatedRegistry({ registry, token, diagnosticLog, rejectedRequestObserver = null }) {
+  if (!registry || typeof registry.match !== 'function' || typeof token !== 'string' || !MACHINE_TOKEN.test(token) ||
+      (rejectedRequestObserver !== null && typeof rejectedRequestObserver !== 'function')) {
     throw Object.assign(new Error('Invalid machine ingest authentication configuration'), { code: 'INGEST_AUTH_CONFIG_INVALID' });
   }
   const expected = digest(token);
@@ -21,6 +22,9 @@ export function createAuthenticatedRegistry({ registry, token, diagnosticLog }) 
         discardWithoutCapture(req);
         res.setHeader('Connection', 'close');
         res.setHeader('WWW-Authenticate', 'Bearer');
+        // The synchronous observer only classifies the rejected request. Its
+        // failure cannot admit a request or reach the device adapter/storage.
+        try { rejectedRequestObserver?.(req); } catch {}
         try { await diagnosticLog?.write({ type: 'machine_auth_rejected' }); } catch {}
         text(res, 401, 'UNAUTHENTICATED');
         return;

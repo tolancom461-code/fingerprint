@@ -120,3 +120,12 @@ test('source failure returns an error without SQL details or silent demo substit
   assert.equal(response.status, 500);
   assert.deepEqual(await response.json(), { error: 'INTERNAL_ERROR', message: 'تعذر إتمام الطلب' });
 });
+
+test('read-only deployment does not expose cloud device connection diagnostics', async t => {
+  const lab = await start(t);
+  const session = await lab.login();
+  const response = await fetch(lab.base + '/api/portal/device-connection-diagnostics', { headers: { Cookie: session.cookie } });
+  assert.equal(response.status, 404);
+  assert.equal((await response.json()).error, 'NOT_FOUND');
+  assert.deepEqual(lab.calls, []);
+});

@@ -52,10 +52,12 @@ function configuration(port) {
     retrySweepSeconds: 1, retryDelaySeconds: 1, replayLimit: 1000,
     adms: { delaySeconds: 10, errorDelaySeconds: 60, realtime: 1, encrypt: 0 } };
 }
-async function start(t) {
+async function start(t, { includeViewer = false, retrySweepSeconds = 1 } = {}) {
   const fixture = fakeDatabase();
   const logs = [];
   const config = configuration(await freePort());
+  config.retrySweepSeconds = retrySweepSeconds;
+  if (includeViewer) config.portal.users.push({ username: 'test-viewer', passwordHash, role: 'viewer' });
   const runtime = await startCloudIngest({ config, openDatabase: async settings => {
     assert.equal(settings, config.database); return fixture.database;
   }, diagnosticLog: { async write(entry) { logs.push(entry); } } });
@@ -63,9 +65,9 @@ async function start(t) {
   return { ...fixture, logs, config, runtime, base: config.portal.origin };
 }
 function writes(state) { return state.calls.filter(call => !/^\s*SELECT\b/.test(call.sql)); }
-async function login(lab) {
+async function login(lab, username = 'test-admin') {
   const response = await fetch(lab.base + '/auth/login', { method: 'POST',
-    headers: { Origin: lab.base, 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'test-admin', password }) });
+    headers: { Origin: lab.base, 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
   assert.equal(response.status, 200);
   return { data: await response.json(), cookie: response.headers.get('set-cookie').split(';')[0] };
 }
@@ -177,4 +179,46 @@ test('initial guard/init and listen failures close resources before returning a 
       diagnosticLog: { async write() {} } }), { code: 'CLOUD_INGEST_START_FAILED' });
     assert.equal(another.state.ended, 1);
   } finally { await new Promise(resolve => occupied.close(resolve)); }
+});
+
+test('connection diagnostics are admin-only, bounded metadata and never admit an unauthenticated device or write to storage', async t => {
+  const lab = await start(t, { includeViewer: true, retrySweepSeconds: 3600 });
+  const route = '/api/portal/device-connection-diagnostics';
+  const anonymous = await fetch(lab.base + route, { headers: { Authorization: `Bearer ${token}` } });
+  assert.equal(anonymous.status, 401); await anonymous.text();
+  const admin = await login(lab);
+  const headers = { Cookie: admin.cookie };
+  const empty = await fetch(lab.base + route, { headers });
+  assert.equal(empty.status, 200);
+  assert.equal((await empty.json()).state, 'no-recent-attempts');
+  const callsBefore = lab.state.calls.length;
+  const attempt = await fetch(lab.base + `/iclock/cdata?SN=TEST-DEVICE&pushver=2.4.1&pushcommkey=${token}&options=all`, {
+    method: 'POST', headers: { Authorization: `Basic ${token}`, Cookie: `session=${privateText}` }, body: privateText });
+  assert.equal(attempt.status, 401);
+  assert.equal(await attempt.text(), 'UNAUTHENTICATED');
+  const observed = await fetch(lab.base + route, { headers });
+  assert.equal(observed.status, 200);
+  assert.equal(observed.headers.get('cache-control'), 'no-store');
+  const snapshot = await observed.json();
+  assert.equal(snapshot.state, 'unauthenticated-attempt-observed');
+  assert.equal(snapshot.authenticated, false);
+  assert.equal(snapshot.sampled, true);
+  assert.equal(snapshot.recent.length, 1);
+  assert.equal(snapshot.recent[0].recognizedDevice, true);
+  assert.equal(snapshot.recent[0].authorizationKind, 'basic');
+  assert.equal(snapshot.recent[0].cookiePresent, true);
+  assert.equal(snapshot.recent[0].pushCommKeyPresent, true);
+  assert.equal(snapshot.recent[0].protocolVersion, '2.4.1');
+  assert.equal(lab.state.calls.length, callsBefore);
+  assert.deepEqual(writes(lab.state), []);
+  for (const value of [token, privateText, 'TEST-DEVICE']) assert.equal(JSON.stringify(snapshot).includes(value), false);
+  const viewer = await login(lab, 'test-viewer');
+  const forbidden = await fetch(lab.base + route, { headers: { Cookie: viewer.cookie } });
+  assert.equal(forbidden.status, 403);
+  assert.equal((await forbidden.json()).error, 'FORBIDDEN');
+  const logout = await fetch(lab.base + '/auth/logout', { method: 'POST', headers: {
+    ...headers, Origin: lab.base, 'X-CSRF-Token': admin.data.csrfToken } });
+  assert.equal(logout.status, 200); await logout.text();
+  const afterLogout = await fetch(lab.base + route, { headers });
+  assert.equal(afterLogout.status, 401); await afterLogout.text();
 });

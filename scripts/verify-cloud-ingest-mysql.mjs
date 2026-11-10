@@ -48,6 +48,7 @@ export async function verifyCloudIngestMysql() {
     };
     assert.equal((await request('/ready')).status, 200);
     assert.equal((await request('/api/portal/received-punches')).status, 401);
+    assert.equal((await request('/api/portal/device-connection-diagnostics')).status, 401);
     const rawCount = async () => { const [[row]] = await lab.sql(`SELECT COUNT(*) AS total FROM \`${T.ingestEvents}\``); return Number(row.total); };
     const batch = [syntheticAttlog('2026-11-09 10:15:00', '0'), syntheticAttlog('2026-11-09 18:15:00', '1')].join('\n');
     const postPath = `/iclock/cdata?SN=${serial}&table=ATTLOG`;
@@ -82,6 +83,19 @@ export async function verifyCloudIngestMysql() {
     assert.equal(session.capabilities.receivedRecords, true);
     assert.equal(session.capabilities.createPerson, false);
     const headers = { Cookie: login.headers.get('set-cookie').split(';')[0] };
+    const diagnosticResponse = await request('/api/portal/device-connection-diagnostics', { headers });
+    assert.equal(diagnosticResponse.status, 200);
+    const diagnostics = await diagnosticResponse.json();
+    assert.equal(diagnostics.authenticated, false);
+    assert.equal(diagnostics.sampled, true);
+    assert.equal(diagnostics.state, 'unauthenticated-attempt-observed');
+    assert.equal(diagnostics.recent.length, 1);
+    assert.equal(diagnostics.recent[0].recognizedDevice, true);
+    for (const secret of [serial, token, portalPassword, 'do-not-store']) {
+      assert.equal(JSON.stringify(diagnostics).includes(secret), false);
+    }
+    assert.equal(await rawCount(), 2);
+    check('private-connection-diagnostics-show-rejection-without-secrets-or-extra-attendance-data');
     const overviewResponse = await request('/api/portal/overview', { headers });
     assert.equal(overviewResponse.status, 200);
     const overview = await overviewResponse.json();
@@ -118,6 +132,17 @@ export async function verifyCloudIngestMysql() {
     runtime = await startCloudIngest({ config });
     assert.equal((await request('/ready')).status, 200);
     assert.equal((await request('/auth/session', { headers })).status, 401);
+    const restartedLogin = await request('/auth/login', { method: 'POST',
+      headers: { Origin: base, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'local-cloud-test', password: portalPassword }) });
+    assert.equal(restartedLogin.status, 200);
+    await restartedLogin.text();
+    const freshHeaders = { Cookie: restartedLogin.headers.get('set-cookie').split(';')[0] };
+    const restartedDiagnostics = await request('/api/portal/device-connection-diagnostics', { headers: freshHeaders });
+    assert.equal(restartedDiagnostics.status, 200);
+    const freshSnapshot = await restartedDiagnostics.json();
+    assert.equal(freshSnapshot.state, 'no-recent-attempts');
+    assert.equal(freshSnapshot.recent.length, 0);
     assert.equal((await request(postPath, { method: 'POST', headers: machineHeaders, body: batch })).status, 200);
     assert.equal(await rawCount(), 2);
     check('runtime-restart-revalidates-writer-and-does-not-duplicate-received-records');
@@ -128,7 +153,8 @@ export async function verifyCloudIngestMysql() {
     if (lab) { report.cleanup = await lab.close(); report.fixtureDirectory = path.relative(root, lab.directory).replaceAll('\\', '/'); }
     if (lab && (!report.cleanup.mysqlStopped || !report.cleanup.bootstrapRemoved)) report.passed = false;
     report.finishedAtUtc = new Date().toISOString();
-    await fs.writeFile(path.join(root, 'verification/cloud-ingest-mysql-verification-2026-11-09.json'), JSON.stringify(report, null, 2) + '\n');
+    const reportDate = report.startedAtUtc.slice(0, 10);
+    await fs.writeFile(path.join(root, `verification/cloud-ingest-mysql-verification-${reportDate}.json`), JSON.stringify(report, null, 2) + '\n');
   }
   return report;
 }
