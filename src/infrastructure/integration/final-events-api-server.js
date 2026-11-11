@@ -1,22 +1,40 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
+import { discardWithoutCapture } from '../http/http-utils.js';
+import { isConsumerApiToken } from './consumer-api-credentials.js';
 
-export function createFinalEventsApiServer({ service, personDirectoryService = null, token, diagnosticLog }) {
-  const expectedToken = String(token ?? '');
-  if (expectedToken.length < 32) throw new Error('Final Events API token must be at least 32 characters');
-
+export function createFinalEventsApiServer(options) {
+  const handle = createFinalEventsApiHandler({ ...options, legacyLoopback: true });
   return http.createServer(async (req, res) => {
+    if (await handle(req, res)) return;
+    setSecurityHeaders(res);
+    json(res, 404, { error: 'NOT_FOUND', message: 'Not found' });
+  });
+}
+
+export function createFinalEventsApiHandler({ service, personDirectoryService = null, token, diagnosticLog, legacyLoopback = false }) {
+  const expectedToken = legacyLoopback ? String(token ?? '') : token;
+  if (legacyLoopback ? expectedToken.length < 32 : !isConsumerApiToken(expectedToken)) {
+    throw new Error(legacyLoopback ? 'Final Events API token must be at least 32 characters' : 'Invalid consumer API configuration');
+  }
+  const expected = digest(expectedToken);
+
+  return async (req, res, parsedUrl = null) => {
     try {
+      const url = parsedUrl ?? new URL(req.url || '/', 'http://127.0.0.1');
+      if (url.pathname !== '/api/v1/health' && !isProtectedReadPath(url.pathname)) return false;
       setSecurityHeaders(res);
-      const url = new URL(req.url || '/', 'http://127.0.0.1');
 
       if (req.method === 'GET' && url.pathname === '/api/v1/health') {
         return json(res, 200, { ok: true, service: 'biometric-final-events-api', apiVersion: 'v1' });
       }
 
       if (isProtectedReadPath(url.pathname)) {
-        if (req.method !== 'GET') return json(res, 405, { error: 'READ_ONLY_API', message: 'This API is read-only' }, { allow: 'GET' });
-        enforceBearer(req, expectedToken);
+        if (req.method !== 'GET') {
+          if (!legacyLoopback) discardWithoutCapture(req);
+          return json(res, 405, { error: 'READ_ONLY_API', message: 'This API is read-only' }, { allow: 'GET' });
+        }
+        enforceBearer(req, expected, legacyLoopback);
       }
 
       if (req.method === 'GET' && url.pathname === '/api/v1/final-events') {
@@ -42,22 +60,26 @@ export function createFinalEventsApiServer({ service, personDirectoryService = n
 
       return json(res, 404, { error: 'NOT_FOUND', message: 'Not found' });
     } catch (error) {
+      setSecurityHeaders(res);
       const status = httpStatus(error);
+      const body = legacyLoopback
+        ? { error: error?.code ?? 'FINAL_EVENTS_API_ERROR', message: safeMessage(error) }
+        : cloudError(status);
+      if (!legacyLoopback) discardWithoutCapture(req);
       try {
         await diagnosticLog?.write?.({
           type: 'final_events_api_request_error',
-          errorCode: error?.code ?? 'FINAL_EVENTS_API_ERROR',
-          method: req.method,
-          path: safePath(req.url),
+          errorCode: body.error,
+          ...(legacyLoopback ? { method: req.method, path: safePath(req.url) } : {}),
           occurredAt: new Date().toISOString()
         });
       } catch {
         // API responses must not depend on diagnostic logging.
       }
       const headers = status === 401 ? { 'www-authenticate': 'Bearer' } : undefined;
-      return json(res, status, { error: error?.code ?? 'FINAL_EVENTS_API_ERROR', message: safeMessage(error) }, headers);
+      return json(res, status, body, headers);
     }
-  });
+  };
 }
 
 function isProtectedReadPath(pathname) {
@@ -66,14 +88,25 @@ function isProtectedReadPath(pathname) {
     || pathname === '/api/v1/person-directory';
 }
 
-function enforceBearer(req, expectedToken) {
-  const authorization = String(req.headers.authorization ?? '');
-  if (!authorization.startsWith('Bearer ')) throw codedError('AUTH_REQUIRED', 'Bearer token required');
-  const provided = authorization.slice(7).trim();
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expectedToken);
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) throw codedError('AUTH_REQUIRED', 'Bearer token required');
+function enforceBearer(req, expected, legacyLoopback) {
+  const authorization = legacyLoopback ? String(req.headers.authorization ?? '') : req.headers.authorization;
+  const provided = typeof authorization === 'string' && authorization.startsWith('Bearer ')
+    ? authorization.slice(7) : null;
+  const candidate = legacyLoopback ? provided?.trim() : provided;
+  if (!candidate || (!legacyLoopback && (!isConsumerApiToken(candidate) || duplicateAuthorization(req))) ||
+      !crypto.timingSafeEqual(digest(candidate), expected)) throw codedError('AUTH_REQUIRED', 'Bearer token required');
 }
+
+function duplicateAuthorization(req) {
+  let count = 0;
+  const headers = req.rawHeaders ?? [];
+  for (let index = 0; index < headers.length; index += 2) {
+    if (headers[index].toLowerCase() === 'authorization' && ++count > 1) return true;
+  }
+  return false;
+}
+
+function digest(value) { return crypto.createHash('sha256').update(value, 'utf8').digest(); }
 
 function setSecurityHeaders(res) {
   res.setHeader('x-content-type-options', 'nosniff');
@@ -93,6 +126,7 @@ function json(res, status, value, extraHeaders = undefined) {
     ...(extraHeaders ?? {})
   });
   res.end(body);
+  return true;
 }
 
 function httpStatus(error) {
@@ -107,6 +141,13 @@ function safeMessage(error) {
     return error.message;
   }
   return 'Unexpected server error';
+}
+
+function cloudError(status) {
+  if (status === 401) return { error: 'AUTH_REQUIRED', message: 'Bearer token required' };
+  if (status === 404) return { error: 'FINAL_EVENT_NOT_FOUND', message: 'Final event not found' };
+  if (status === 400) return { error: 'INVALID_REQUEST', message: 'Invalid request' };
+  return { error: 'FINAL_EVENTS_API_ERROR', message: 'Unexpected server error' };
 }
 
 function safePath(rawUrl) {

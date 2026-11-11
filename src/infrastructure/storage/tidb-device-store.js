@@ -81,6 +81,7 @@ export class TiDbDeviceStore {
          ) VALUES (?, ?, ?, 'seen', 1, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
            display_name = COALESCE(VALUES(display_name), display_name),
+           status = CASE WHEN status = 'absent_from_device' THEN 'seen' ELSE status END,
            safe_metadata = COALESCE(VALUES(safe_metadata), safe_metadata),
            last_seen_at = VALUES(last_seen_at)`,
         [row.id, user.deviceUserId, user.displayName, jsonOrNull(user.metadata), observedAt, observedAt]

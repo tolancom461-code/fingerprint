@@ -100,7 +100,8 @@ function createPortalHandler({ config, service, mode, connectionDiagnostics = nu
           ]);
           if (mode === 'database-ingest') {
             reads.set('/api/portal/received-punches', () => service.listReceivedPunches(filters));
-            reads.set('/api/portal/device-users', () => service.listDeviceUsers(filters));
+            reads.set('/api/portal/device-users', () => service.listDeviceUsers({ ...filters,
+              roster: url.searchParams.get('roster') ?? undefined }));
           }
           if (reads.has(pathname)) {
             json(res, 200, await reads.get(pathname)());

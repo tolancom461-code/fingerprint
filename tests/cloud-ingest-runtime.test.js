@@ -11,7 +11,8 @@ const passwordHash = await hashPassword(password);
 const privateText = 'PRIVATE_PIN_NAME_AND_PAYLOAD';
 
 function fakeDatabase() {
-  const state = { calls: [], checks: 0, ended: 0, available: true, flagAvailable: true, failWrite: false };
+  const state = { calls: [], checks: 0, ended: 0, available: true, flagAvailable: true, failWrite: false,
+    consumerEvents: [], consumerPeople: [], consumerError: null };
   const database = {
     async checkReady() {
       state.checks++;
@@ -29,7 +30,14 @@ function fakeDatabase() {
       if (sql.includes('FROM `biometric_svc_devices`') && sql.includes('WHERE vendor = ?')) return [[{
         id: '1', vendor: 'zkteco', serial_number: 'TEST-DEVICE', status: 'active', mode: 'test', timezone: 'Asia/Riyadh', accept_events_from: null
       }], []];
-      if (/\bCOUNT\(\*\)/.test(sql)) return [[{ total: 0, active: 0, test_mode: 0, received: 0, device_users: 0 }], []];
+      if (/\bCOUNT\(\*\)/.test(sql)) return [[{ total: 0, active: 0, test_mode: 0, received: 0, device_users: 0,
+        historical_device_users: 0, current_device_users: 0, all_device_users: 0 }], []];
+      if (sql.includes('SELECT id, final_event_uuid, person_code')) {
+        if (state.consumerError) throw state.consumerError;
+        return [sql.includes('final_event_uuid = ?')
+          ? state.consumerEvents.filter(event => event.final_event_uuid === params[0]) : state.consumerEvents, []];
+      }
+      if (sql.includes('SELECT person_code, display_name, status')) return [state.consumerPeople, []];
       if (/^\s*SELECT\b/.test(sql)) return [[], []];
       throw new Error('Unexpected synthetic pipeline write');
     },
@@ -52,12 +60,13 @@ function configuration(port) {
     retrySweepSeconds: 1, retryDelaySeconds: 1, replayLimit: 1000,
     adms: { delaySeconds: 10, errorDelaySeconds: 60, realtime: 1, encrypt: 0 } };
 }
-async function start(t, { includeViewer = false, retrySweepSeconds = 1, basicCredentials } = {}) {
+async function start(t, { includeViewer = false, retrySweepSeconds = 1, basicCredentials, consumerApi } = {}) {
   const fixture = fakeDatabase();
   const logs = [];
   const config = configuration(await freePort());
   config.retrySweepSeconds = retrySweepSeconds;
   if (basicCredentials !== undefined) config.basicCredentials = basicCredentials;
+  if (consumerApi !== undefined) config.consumerApi = consumerApi;
   if (includeViewer) config.portal.users.push({ username: 'test-viewer', passwordHash, role: 'viewer' });
   const runtime = await startCloudIngest({ config, openDatabase: async settings => {
     assert.equal(settings, config.database); return fixture.database;
@@ -112,10 +121,32 @@ test('the ingest listener keeps portal reads authenticated and rejects portal wr
   const write = await fetch(lab.base + '/api/portal/people', { method: 'POST', headers,
     body: JSON.stringify({ personCode: 'SYNTHETIC', displayName: privateText }) });
   assert.equal(write.status, 403); await write.text();
-  for (const route of ['/api/overview', '/api/devices', '/api/v1/final-events', '/api/biometric-bridge/v1/final-events']) {
+  for (const route of ['/api/overview', '/api/devices', '/api/v1/health', '/api/v1/final-events',
+    '/api/v1/person-directory', '/api/biometric-bridge/v1/final-events']) {
     const response = await fetch(lab.base + route, { headers });
     assert.equal(response.status, 404); await response.text();
   }
+  assert.deepEqual(writes(lab.state), []);
+});
+
+test('device roster filters reach authenticated reads and invalid values fail before SQL', async t => {
+  const lab = await start(t, { retrySweepSeconds: 3600 });
+  const session = await login(lab);
+  for (const roster of ['current', 'historical', 'all']) {
+    const response = await fetch(lab.base + '/api/portal/device-users?roster=' + roster, { headers: { Cookie: session.cookie } });
+    assert.equal(response.status, 200); await response.json();
+  }
+  const listQueries = lab.state.calls.filter(call => /SELECT u\.id,u\.device_user_id/.test(call.sql));
+  assert.equal(listQueries.length, 3);
+  assert.match(listQueries[0].sql, /u\.status <> 'absent_from_device'/);
+  assert.match(listQueries[1].sql, /u\.status = 'absent_from_device'/);
+  assert.doesNotMatch(listQueries[2].sql, /u\.status [=<>]/);
+  const calls = lab.state.calls.length;
+  const invalid = await fetch(lab.base + '/api/portal/device-users?roster=unknown', { headers: { Cookie: session.cookie } });
+  assert.equal(invalid.status, 400); await invalid.text();
+  assert.equal(lab.state.calls.length, calls);
+  const anonymous = await fetch(lab.base + '/api/portal/device-users?roster=historical');
+  assert.equal(anonymous.status, 401); await anonymous.text();
   assert.deepEqual(writes(lab.state), []);
 });
 
@@ -318,6 +349,144 @@ test('invalid Basic runtime configuration fails before the database factory is c
       assert.equal(error.code, 'CLOUD_INGEST_START_FAILED');
       assert.equal(error.cause, undefined);
       for (const value of ['private-runtime-device', 'N'.repeat(48)]) assert.equal(String(error.stack).includes(value), false);
+      return true;
+    });
+  }
+  assert.equal(databaseOpenCalls, 0);
+});
+
+const readToken = 'synthetic-consumer-' + 'D'.repeat(48);
+
+test('the optional consumer API serves the v1 contracts through the ingest listener using SELECT only', async t => {
+  const lab = await start(t, { consumerApi: { token: readToken }, retrySweepSeconds: 3600 });
+  const uuid = '11111111-1111-4111-8111-111111111111';
+  const event = { id: '41', final_event_uuid: uuid, person_code: 'P01', event_type: 'in',
+    event_time_utc: '2026-11-11 05:00:00', event_time_local: '2026-11-11 08:00:00', event_timezone: 'Asia/Riyadh',
+    verification_method: 'fingerprint', finalization_version: 'v1', source_device_user_id: privateText };
+  lab.state.consumerEvents = [event, { ...event, id: '42', final_event_uuid: '22222222-2222-4222-8222-222222222222' }];
+  lab.state.consumerPeople = [{ person_code: 'P01', display_name: 'Fixture Person', status: 'active', raw_data: privateText }];
+  const initialCalls = lab.state.calls.length;
+  const headers = { Authorization: `Bearer ${readToken}` };
+  const health = await fetch(lab.base + '/api/v1/health');
+  assert.equal(health.status, 200);
+  assert.deepEqual(await health.json(), { ok: true, service: 'biometric-final-events-api', apiVersion: 'v1' });
+
+  const events = await fetch(lab.base + '/api/v1/final-events?after_id=40&limit=1', { headers });
+  assert.equal(events.status, 200);
+  assert.equal(events.headers.get('cache-control'), 'no-store');
+  const publicEvent = { eventId: uuid, personCode: 'P01', eventType: 'in', eventTimeUtc: '2026-11-11T05:00:00Z',
+    eventTimeLocal: '2026-11-11T08:00:00', eventTimezone: 'Asia/Riyadh', verificationMethod: 'fingerprint', finalizationVersion: 'v1' };
+  assert.deepEqual(await events.json(), { apiVersion: 'v1', items: [publicEvent],
+    page: { afterId: '40', nextAfterId: '41', limit: 1, hasMore: true } });
+
+  const detail = await fetch(lab.base + '/api/v1/final-events/' + uuid, { headers });
+  assert.equal(detail.status, 200);
+  assert.deepEqual(await detail.json(), { apiVersion: 'v1', event: publicEvent });
+
+  const people = await fetch(lab.base + '/api/v1/person-directory?status=active&after_code=P00&limit=2', { headers });
+  assert.equal(people.status, 200);
+  assert.deepEqual(await people.json(), { apiVersion: 'v1', items: [{ personCode: 'P01', displayName: 'Fixture Person', status: 'active' }],
+    page: { afterCode: 'P00', nextAfterCode: 'P01', limit: 2, hasMore: false } });
+
+  const reads = lab.state.calls.slice(initialCalls);
+  assert.equal(reads.length, 3);
+  assert.ok(reads.every(call => /^\s*SELECT\b/.test(call.sql)));
+  assert.match(reads[0].sql, /WHERE status = 'final' AND id > \?/);
+  assert.deepEqual(reads.map(call => call.params), [['40'], [uuid], ['active', 'P00']]);
+  assert.deepEqual(writes(lab.state), []);
+});
+
+test('consumer, portal and device credentials cannot substitute for each other; the consumer API refuses writes', async t => {
+  const basicCredentials = { username: 'fixture-native', password: 'N'.repeat(48) };
+  const lab = await start(t, { basicCredentials, consumerApi: { token: readToken }, retrySweepSeconds: 3600 });
+  const session = await login(lab);
+  const callsBefore = lab.state.calls.length;
+  const route = '/api/v1/final-events';
+  const consumerHeader = { Authorization: `Bearer ${readToken}` };
+
+  for (const headers of [{}, { Cookie: session.cookie }, { Authorization: `Bearer ${token}` },
+    { Authorization: basicAuthorization(basicCredentials.username, basicCredentials.password) },
+    { Authorization: `Bearer ${basicCredentials.password}` }]) {
+    const response = await fetch(lab.base + route + '?token=' + readToken, { headers });
+    assert.equal(response.status, 401);
+    assert.equal(response.headers.get('www-authenticate'), 'Bearer');
+    assert.deepEqual(await response.json(), { error: 'AUTH_REQUIRED', message: 'Bearer token required' });
+  }
+
+  const duplicateStatus = await new Promise((resolve, reject) => {
+    const request = http.get(lab.base + route, { headers: { Authorization: [consumerHeader.Authorization, consumerHeader.Authorization] } }, response => {
+      response.resume();
+      response.once('end', () => resolve(response.statusCode));
+    });
+    request.once('error', reject);
+  });
+  assert.equal(duplicateStatus, 401);
+
+  for (const headers of [consumerHeader, { Authorization: basicAuthorization(basicCredentials.username, readToken) }]) {
+    const response = await fetch(lab.base + '/iclock/cdata?SN=TEST-DEVICE', { headers });
+    assert.equal(response.status, 401);
+    await response.text();
+  }
+  const portal = await fetch(lab.base + '/api/portal/overview', { headers: consumerHeader });
+  assert.equal(portal.status, 401);
+  await portal.text();
+
+  for (const [method, path] of [['POST', route], ['PATCH', '/api/v1/person-directory'], ['DELETE', route + '/arbitrary']]) {
+    const response = await fetch(lab.base + path, { method, headers: consumerHeader, body: privateText });
+    assert.equal(response.status, 405);
+    assert.equal(response.headers.get('allow'), 'GET');
+    assert.deepEqual(await response.json(), { error: 'READ_ONLY_API', message: 'This API is read-only' });
+  }
+  assert.equal(lab.state.calls.length, callsBefore);
+  assert.deepEqual(writes(lab.state), []);
+
+  const device = await fetch(lab.base + '/iclock/getrequest?SN=TEST-DEVICE', {
+    headers: { Authorization: `Bearer ${token}` } });
+  assert.equal(device.status, 200);
+  assert.equal(await device.text(), 'OK');
+  assert.equal(writes(lab.state).length, 1);
+  assert.match(writes(lab.state)[0].sql, /INSERT INTO `biometric_svc_devices`/);
+});
+
+test('cloud consumer API errors use fixed responses and redact request and storage details from diagnostics', async t => {
+  const lab = await start(t, { consumerApi: { token: readToken }, retrySweepSeconds: 3600 });
+  const headers = { Authorization: `Bearer ${readToken}` };
+  const failedBodies = [];
+  const callsBefore = lab.state.calls.length;
+
+  for (const path of [`/api/v1/final-events?after_id=${privateText}`, `/api/v1/final-events/%ZZ${privateText}`]) {
+    const response = await fetch(lab.base + path, { headers });
+    assert.equal(response.status, 400);
+    const body = await response.json();
+    assert.deepEqual(body, { error: 'INVALID_REQUEST', message: 'Invalid request' });
+    failedBodies.push(body);
+  }
+  assert.equal(lab.state.calls.length, callsBefore);
+
+  const missing = await fetch(lab.base + '/api/v1/final-events/11111111-1111-4111-8111-111111111111', { headers });
+  assert.equal(missing.status, 404);
+  assert.deepEqual(await missing.json(), { error: 'FINAL_EVENT_NOT_FOUND', message: 'Final event not found' });
+
+  lab.state.consumerError = Object.assign(new Error(privateText), { code: `SQL_${privateText}` });
+  const failed = await fetch(lab.base + `/api/v1/final-events?private=${privateText}`, { headers });
+  assert.equal(failed.status, 500);
+  const body = await failed.json();
+  assert.deepEqual(body, { error: 'FINAL_EVENTS_API_ERROR', message: 'Unexpected server error' });
+  failedBodies.push(body);
+  const diagnostic = JSON.stringify({ failedBodies, logs: lab.logs });
+  for (const value of [privateText, readToken, 'SQL_', '/api/v1/final-events']) assert.equal(diagnostic.includes(value), false);
+});
+
+test('partial or conflicting consumer runtime settings are rejected before the database opens', async () => {
+  const basicCredentials = { username: 'fixture-native', password: 'N'.repeat(48) };
+  let databaseOpenCalls = 0;
+  for (const consumerApi of [{}, { token }, { token: basicCredentials.password }, { token: 'short' }, { token: readToken, enabled: false }]) {
+    await assert.rejects(startCloudIngest({ config: { ...configuration(0), basicCredentials, consumerApi },
+      openDatabase: async () => { databaseOpenCalls++; throw new Error('Unexpected database open'); },
+      diagnosticLog: { async write() {} } }), error => {
+      assert.equal(error.code, 'CLOUD_INGEST_START_FAILED');
+      assert.equal(error.cause, undefined);
+      for (const value of [token, readToken, basicCredentials.password]) assert.equal(error.stack.includes(value), false);
       return true;
     });
   }

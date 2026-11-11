@@ -1,5 +1,6 @@
 import { portalAccountsConfig } from './portal-accounts.js';
 import { normalizeBasicMachineCredentials } from '../infrastructure/ingest/basic-machine-credentials.js';
+import { normalizeConsumerApiConfig } from '../infrastructure/integration/consumer-api-credentials.js';
 
 export function loadCloudIngestConfig(env = process.env) {
   const host = env.BIOMETRIC_INGEST_HOST ?? '0.0.0.0';
@@ -23,6 +24,7 @@ export function loadCloudIngestConfig(env = process.env) {
   if (env.BIOMETRIC_INGEST_AUTO_FINALIZE_NEW_PUNCHES !== undefined && env.BIOMETRIC_INGEST_AUTO_FINALIZE_NEW_PUNCHES !== 'false') throw invalid();
   let portal;
   let basicCredentials = null;
+  let consumerApi;
   try {
     if (Object.hasOwn(env, 'BIOMETRIC_INGEST_BASIC_USERNAME') || Object.hasOwn(env, 'BIOMETRIC_INGEST_BASIC_PASSWORD')) {
       basicCredentials = normalizeBasicMachineCredentials({
@@ -35,9 +37,10 @@ export function loadCloudIngestConfig(env = process.env) {
       adminPasswordHash: env.BIOMETRIC_PORTAL_ADMIN_PASSWORD_HASH,
       viewerUsername: env.BIOMETRIC_PORTAL_VIEWER_USERNAME,
       viewerPasswordHash: env.BIOMETRIC_PORTAL_VIEWER_PASSWORD_HASH });
+    consumerApi = consumerApiConfig(env, token, basicCredentials?.password);
   } catch { throw invalid(); }
   return Object.freeze({ host, port: integer(env.PORT, 8080, 1, 65535), portal,
-    token, basicCredentials, allowedDevices: Object.freeze(allowedDevices),
+    token, basicCredentials, consumerApi, allowedDevices: Object.freeze(allowedDevices),
     maxBodyBytes: integer(env.BIOMETRIC_INGEST_MAX_BODY_BYTES, 524288, 1024, 524288),
     autoFinalizeNewPunches: false,
     retrySweepSeconds: integer(env.BIOMETRIC_INGEST_RETRY_SWEEP_SECONDS, 2, 1, 3600),
@@ -49,6 +52,16 @@ export function loadCloudIngestConfig(env = process.env) {
       connectTimeoutMs: integer(env.BIOMETRIC_INGEST_DB_CONNECT_TIMEOUT_MS, 6000, 100, 10000),
       queryTimeoutMs: integer(env.BIOMETRIC_INGEST_DB_QUERY_TIMEOUT_MS, 5000, 100, 10000),
       transactionTimeoutMs: integer(env.BIOMETRIC_INGEST_DB_TRANSACTION_TIMEOUT_MS, 15000, 1000, 30000) }) });
+}
+
+function consumerApiConfig(env, ingestToken, basicPassword) {
+  const hasEnabled = Object.hasOwn(env, 'BIOMETRIC_INGEST_CONSUMER_API_ENABLED');
+  const hasToken = Object.hasOwn(env, 'BIOMETRIC_INGEST_CONSUMER_API_TOKEN');
+  if (!hasEnabled && !hasToken) return null;
+  const enabled = env.BIOMETRIC_INGEST_CONSUMER_API_ENABLED;
+  if (enabled === 'false' && !hasToken) return null;
+  if (!hasEnabled || enabled !== 'true' || !hasToken) throw invalid();
+  return normalizeConsumerApiConfig({ token: env.BIOMETRIC_INGEST_CONSUMER_API_TOKEN }, { ingestToken, basicPassword });
 }
 
 function required(env, name) {

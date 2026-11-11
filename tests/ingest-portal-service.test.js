@@ -48,3 +48,37 @@ test('malformed pagination and invalid source values do not produce fabricated r
   broken.pageReceivedPunches = async () => ({ items: [{}], page: { number: 1, limit: 10, total: 1, totalPages: 1 } });
   await assert.rejects(createIngestPortalService({ readStore: broken }).listReceivedPunches(), { code: 'INGEST_PORTAL_DATA_INVALID' });
 });
+
+test('current roster is the default and explicit historical/all filters reach the read store', async () => {
+  const reads = store();
+  const calls = [];
+  const original = reads.pageDeviceUsers;
+  reads.pageDeviceUsers = async query => { calls.push(query); return original(query); };
+  const service = createIngestPortalService({ readStore: reads });
+  await service.listDeviceUsers();
+  await service.listDeviceUsers({ roster: 'historical', search: 'archived' });
+  await service.listDeviceUsers({ roster: 'all' });
+  assert.deepEqual(calls.map(x => x.roster), ['current', 'historical', 'all']);
+  assert.equal(calls[1].search, 'archived');
+  for (const roster of ['', 'CURRENT', 'absent_from_device', true, {}, "historical' OR 1=1"]) {
+    await assert.rejects(service.listDeviceUsers({ roster }), { code: 'INVALID_INPUT', status: 400 });
+  }
+  assert.equal(calls.length, 3);
+});
+
+test('current, historical and all totals remain distinct and never expose private metadata', async () => {
+  const reads = store();
+  reads.getIntakeCounts = async () => ({ received: 3596, deviceUsers: 175, historicalDeviceUsers: 7, allDeviceUsers: 182 });
+  const original = reads.pageDeviceUsers;
+  reads.pageDeviceUsers = async query => ({ ...await original(query), rosterCounts: { current: 175, historical: 7, all: 182, secret: 'never leak' } });
+  const service = createIngestPortalService({ readStore: reads });
+  const overview = await service.overview();
+  assert.equal(overview.counts.deviceUsers, 175);
+  assert.equal(overview.counts.historicalDeviceUsers, 7);
+  assert.equal(overview.counts.allDeviceUsers, 182);
+  const list = await service.listDeviceUsers({ roster: 'historical' });
+  assert.deepEqual(list.rosterCounts, { current: 175, historical: 7, all: 182 });
+  assert.ok(!JSON.stringify(list).includes('never leak'));
+  reads.pageDeviceUsers = async query => ({ ...await original(query), rosterCounts: { current: 175, historical: 7, all: 181 } });
+  await assert.rejects(service.listDeviceUsers(), { code: 'INGEST_PORTAL_DATA_INVALID' });
+});

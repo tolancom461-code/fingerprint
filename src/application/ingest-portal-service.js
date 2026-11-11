@@ -6,8 +6,13 @@ export function createIngestPortalService({ readStore }) {
   return Object.freeze({ ...base,
     async overview() {
       const [summary, counts] = await Promise.all([base.overview(), readStore.getIntakeCounts()]);
+      const extraCounts = counts.historicalDeviceUsers === undefined ? {} : {
+        historicalDeviceUsers: integer(counts.historicalDeviceUsers, 0, Number.MAX_SAFE_INTEGER),
+        allDeviceUsers: integer(counts.allDeviceUsers, 0, Number.MAX_SAFE_INTEGER)
+      };
+      if (extraCounts.historicalDeviceUsers !== undefined && counts.deviceUsers + extraCounts.historicalDeviceUsers !== extraCounts.allDeviceUsers) throw invalid();
       return { ...summary, mode: 'database-ingest', counts: { ...summary.counts,
-        received: integer(counts.received, 0, Number.MAX_SAFE_INTEGER), deviceUsers: integer(counts.deviceUsers, 0, Number.MAX_SAFE_INTEGER) } };
+        received: integer(counts.received, 0, Number.MAX_SAFE_INTEGER), deviceUsers: integer(counts.deviceUsers, 0, Number.MAX_SAFE_INTEGER), ...extraCounts } };
     },
     async listReceivedPunches(filters) {
       const query = readFilters(filters);
@@ -20,14 +25,27 @@ export function createIngestPortalService({ readStore }) {
       }));
     },
     async listDeviceUsers(filters) {
-      const query = readFilters(filters);
-      return projectPage(await readStore.pageDeviceUsers(query), query, row => ({
+      const query = readDeviceUserFilters(filters);
+      const result = await readStore.pageDeviceUsers(query);
+      const page = projectPage(result, query, row => ({
         id: id(row.id), deviceUserId: text(row.device_user_id), displayName: text(row.display_name, true),
         status: text(row.status), lastSeenAt: utc(row.last_seen_at, true), deviceName: text(row.device_name),
         mappedPersonCode: text(row.mapped_person_code, true), mappedPersonName: text(row.mapped_person_name, true)
       }));
+      if (result.rosterCounts === undefined) return page;
+      const rosterCounts = Object.fromEntries(['current', 'historical', 'all'].map(key => [key, integer(result.rosterCounts?.[key], 0, Number.MAX_SAFE_INTEGER)]));
+      if (rosterCounts.current + rosterCounts.historical !== rosterCounts.all || page.page.total > rosterCounts[query.roster]) throw invalid();
+      return { ...page, ...(rosterCounts.historical ? { rosterCounts } : {}) };
     }
   });
+}
+function readDeviceUserFilters(filters) {
+  const query = readFilters(filters);
+  const roster = filters?.roster ?? 'current';
+  if (typeof roster !== 'string' || !['current', 'historical', 'all'].includes(roster)) {
+    throw Object.assign(new TypeError('Invalid device roster filter'), { code: 'INVALID_INPUT', status: 400 });
+  }
+  return { ...query, roster };
 }
 function readFilters(filters = {}) {
   const badInput = () => Object.assign(new TypeError('Invalid intake list filters'), { code: 'INVALID_INPUT', status: 400 });

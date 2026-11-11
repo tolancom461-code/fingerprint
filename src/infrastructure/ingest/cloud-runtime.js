@@ -4,8 +4,12 @@ import { TiDbIngestStore } from '../storage/tidb-ingest-store.js';
 import { TiDbPunchStore } from '../storage/tidb-punch-store.js';
 import { TiDbFinalizationStore } from '../storage/tidb-finalization-store.js';
 import { TiDbIngestReadStore } from '../storage/tidb-ingest-read-store.js';
+import { TiDbFinalEventsReadStore } from '../storage/tidb-final-events-read-store.js';
+import { TiDbPersonDirectoryReadStore } from '../storage/tidb-person-directory-read-store.js';
 import { EnvDeviceRegistry } from '../storage/env-device-registry.js';
 import { FinalizationService } from '../../application/finalization-service.js';
+import { FinalEventsReadService } from '../../application/final-events-read-service.js';
+import { PersonDirectoryReadService } from '../../application/person-directory-read-service.js';
 import { AutomaticFinalizingPunchStore } from '../../application/automatic-finalizing-punch-store.js';
 import { ReceivePunchBatch } from '../../application/receive-punch-batch.js';
 import { replayDurableIngest } from '../../application/replay-durable-ingest.js';
@@ -18,6 +22,8 @@ import { createCloudIngestPortalHandler } from '../portal/server.js';
 import { createAuthenticatedRegistry } from './authenticated-registry.js';
 import { createDeviceConnectionDiagnostics } from './device-connection-diagnostics.js';
 import { normalizeBasicMachineCredentials } from './basic-machine-credentials.js';
+import { createFinalEventsApiHandler } from '../integration/final-events-api-server.js';
+import { normalizeConsumerApiConfig } from '../integration/consumer-api-credentials.js';
 
 const defaultLog = Object.freeze({ async write(entry) { process.stdout.write(JSON.stringify(entry) + '\n'); } });
 const LOG_TYPES = new Set([
@@ -27,14 +33,14 @@ const LOG_TYPES = new Set([
   'canonical_punch_replay_failed', 'durable_ingest_replay_completed', 'durable_ingest_retry_sweep_completed',
   'durable_ingest_retry_sweep_failed', 'automatic_finalization_failed', 'automatic_finalization_succeeded',
   'automatic_finalization_unresolved', 'automatic_finalization_retry_failed',
-  'automatic_finalization_retry_sweep_completed', 'automatic_finalization_retry_sweep_failed', 'server_error', 'request_too_large'
+  'automatic_finalization_retry_sweep_completed', 'automatic_finalization_retry_sweep_failed',
+  'final_events_api_request_error', 'server_error', 'request_too_large'
 ]);
 const LOG_COUNTS = ['lineCount', 'validCount', 'invalidCount', 'unsafeCount', 'acceptedCount', 'duplicateCount',
   'canonicalInsertedCount', 'canonicalDuplicateCount', 'canonicalPendingCount', 'canonicalNotApplicableCount',
   'recordCount', 'eligibleCount', 'insertedCount', 'failedCount', 'finalCount', 'unresolvedCount'];
 
-// No environment/configuration imports, filesystem captures, legacy administration,
-// integration API or outbound consumer run in this listener.
+// The optional consumer API uses its own bearer credential and SELECT stores.
 export async function startCloudIngest({ config, openDatabase = createIngestDatabase, diagnosticLog = defaultLog } = {}) {
   let database;
   let server;
@@ -42,7 +48,7 @@ export async function startCloudIngest({ config, openDatabase = createIngestData
   let finalizationRetryLoop;
   const log = sanitizedLog(diagnosticLog);
   try {
-    const basicCredentials = validateRuntimeConfig(config);
+    const { basicCredentials, consumerApi } = validateRuntimeConfig(config);
     database = await openDatabase(config.database);
     await database.checkReady();
     const deviceRegistry = new EnvDeviceRegistry(config.allowedDevices);
@@ -67,10 +73,16 @@ export async function startCloudIngest({ config, openDatabase = createIngestData
       rejectedRequestObserver: req => connectionDiagnostics.recordRejectedRequest(req) });
     const portal = createCloudIngestPortalHandler({ config: config.portal, readStore: new TiDbIngestReadStore(database),
       connectionDiagnostics });
+    const consumerHandler = consumerApi ? createFinalEventsApiHandler({
+      service: new FinalEventsReadService({ readStore: new TiDbFinalEventsReadStore(database) }),
+      personDirectoryService: new PersonDirectoryReadService({ readStore: new TiDbPersonDirectoryReadStore(database) }),
+      token: consumerApi.token,
+      diagnosticLog: log
+    }) : null;
     server = createHttpServer({ adapterRegistry: registry, diagnosticLog: log,
       portalHandler: async (req, res) => {
-        const pathname = new URL(req.url || '/', config.portal.origin).pathname;
-        if (req.method === 'GET' && pathname === '/ready') {
+        const url = new URL(req.url || '/', config.portal.origin);
+        if (req.method === 'GET' && url.pathname === '/ready') {
           let ready = false;
           try { await database.checkReady(); ready = true; } catch {}
           const body = JSON.stringify({ status: ready ? 'ready' : 'unavailable', mode: 'database-ingest' });
@@ -79,6 +91,7 @@ export async function startCloudIngest({ config, openDatabase = createIngestData
           res.end(body);
           return true;
         }
+        if (consumerHandler && await consumerHandler(req, res, url)) return true;
         return portal(req, res);
       } });
     server.headersTimeout = 10000;
@@ -149,5 +162,10 @@ function validateRuntimeConfig(config) {
       !Number.isInteger(config.replayLimit) || config.replayLimit < 1 || config.replayLimit > 10000 || !config.adms) {
     throw new Error('Invalid cloud ingest runtime configuration');
   }
-  return normalizeBasicMachineCredentials(config.basicCredentials);
+  const basicCredentials = normalizeBasicMachineCredentials(config.basicCredentials);
+  const consumerApi = normalizeConsumerApiConfig(config.consumerApi, {
+    ingestToken: config.token,
+    basicPassword: basicCredentials?.password
+  });
+  return { basicCredentials, consumerApi };
 }

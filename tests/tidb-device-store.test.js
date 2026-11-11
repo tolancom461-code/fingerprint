@@ -50,4 +50,5 @@ test('safe OPERLOG users are stored without password/card/template fields', asyn
   assert.equal(insert.params[1], '900001');
   assert.equal(insert.params[2], 'TEST');
   assert.equal(String(insert.params[3]).includes('Passwd'), false);
+  assert.match(insert.sql, /status = CASE WHEN status = 'absent_from_device' THEN 'seen' ELSE status END/);
 });

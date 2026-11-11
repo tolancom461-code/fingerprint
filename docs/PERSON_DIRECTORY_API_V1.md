@@ -18,16 +18,7 @@ It never exposes internal biometric `person_id`, device-user row IDs, device det
 
 ## Listener and authentication
 
-The Person Directory uses the same loopback-only listener and independent Bearer credential as the Final Events API:
-
-```text
-BIOMETRIC_FINAL_EVENTS_API_ENABLED=true
-BIOMETRIC_FINAL_EVENTS_API_HOST=127.0.0.1
-BIOMETRIC_FINAL_EVENTS_API_PORT=9097
-BIOMETRIC_FINAL_EVENTS_API_TOKEN=<independent strong token>
-```
-
-In this release the listener remains loopback-only. Remote/LAN exposure is not enabled by this change.
+The Person Directory uses the same listener and independent Bearer credential as the Final Events API. See the local and cloud ingest configuration in [Final Events API v1](FINAL_EVENTS_API_V1.md#configuration).
 
 ## Endpoint
 

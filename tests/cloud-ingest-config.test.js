@@ -24,6 +24,7 @@ test('cloud ingest explicitly selects fingerprint and a distinct writer with aut
   assert.equal(config.autoFinalizeNewPunches, false);
   assert.equal(config.token, token);
   assert.equal(config.basicCredentials, null);
+  assert.equal(config.consumerApi, null);
   assert.deepEqual(config.allowedDevices, ['zkteco:FIXTURE-1']);
   assert.equal(config.port, 8080);
   for (const value of [config, config.database, config.portal, config.allowedDevices, config.adms]) assert.ok(Object.isFrozen(value));
@@ -39,6 +40,7 @@ test('legacy, source, demo and read-only credentials never fill the ingest names
   const clean = loadCloudIngestConfig(environment());
   assert.deepEqual(loadCloudIngestConfig({ ...environment(), BIOMETRIC_AUTO_FINALIZE_NEW_PUNCHES: 'true',
     BIOMETRIC_WEB_BRIDGE_ENABLED: 'true', BIOMETRIC_ADMIN_ENABLED: 'true', BIOMETRIC_DB_NAME: 'test',
+    BIOMETRIC_FINAL_EVENTS_API_ENABLED: 'true', BIOMETRIC_FINAL_EVENTS_API_TOKEN: 'legacy-read-token',
     TIDB_SOURCE_PASSWORD: 'must-not-inherit' }), clean);
   assert.ok(!('webBridge' in clean) && !('finalEventsApi' in clean));
 });
@@ -121,4 +123,43 @@ test('portal, staging, database and generic Basic values cannot fill either mach
   assert.equal(config.basicCredentials, null);
   rejects({ ...aliases, BIOMETRIC_INGEST_BASIC_USERNAME: 'fixture-device' });
   rejects({ ...aliases, BIOMETRIC_INGEST_BASIC_PASSWORD: password });
+});
+
+test('the consumer API defaults to disabled and requires an exact opt-in with an independent token', () => {
+  const readToken = 'synthetic-consumer-token-' + 'D'.repeat(48);
+  const explicitOff = loadCloudIngestConfig({ ...environment(), BIOMETRIC_INGEST_CONSUMER_API_ENABLED: 'false' });
+  assert.equal(explicitOff.consumerApi, null);
+  const config = loadCloudIngestConfig({ ...environment(),
+    BIOMETRIC_INGEST_CONSUMER_API_ENABLED: 'true', BIOMETRIC_INGEST_CONSUMER_API_TOKEN: readToken });
+  assert.deepEqual(config.consumerApi, { token: readToken });
+  assert.ok(Object.isFrozen(config.consumerApi));
+  assert.equal(config.token, token);
+  assert.equal(config.autoFinalizeNewPunches, false);
+});
+
+test('partial, malformed and reused consumer credentials fail closed without exposing configuration values', () => {
+  const readToken = 'PRIVATE_CONSUMER_' + 'D'.repeat(48);
+  const enabled = { BIOMETRIC_INGEST_CONSUMER_API_ENABLED: 'true' };
+  const credential = { BIOMETRIC_INGEST_CONSUMER_API_TOKEN: readToken };
+  for (const changes of [enabled, credential,
+    { ...credential, BIOMETRIC_INGEST_CONSUMER_API_ENABLED: 'false' },
+    { ...credential, BIOMETRIC_INGEST_CONSUMER_API_ENABLED: 'TRUE' },
+    { BIOMETRIC_INGEST_CONSUMER_API_ENABLED: undefined },
+    { ...enabled, BIOMETRIC_INGEST_CONSUMER_API_TOKEN: '' },
+    { ...enabled, BIOMETRIC_INGEST_CONSUMER_API_TOKEN: 'D'.repeat(42) },
+    { ...enabled, BIOMETRIC_INGEST_CONSUMER_API_TOKEN: 'D'.repeat(129) },
+    { ...enabled, BIOMETRIC_INGEST_CONSUMER_API_TOKEN: `${readToken}\n` },
+    { ...enabled, BIOMETRIC_INGEST_CONSUMER_API_TOKEN: `${readToken}=` },
+    { ...enabled, BIOMETRIC_INGEST_CONSUMER_API_TOKEN: token },
+    { ...enabled, ...credential, BIOMETRIC_INGEST_BASIC_USERNAME: 'native-device', BIOMETRIC_INGEST_BASIC_PASSWORD: readToken }
+  ]) {
+    assert.throws(() => loadCloudIngestConfig({ ...environment(), ...changes }), error => {
+      assert.equal(error.code, 'CLOUD_INGEST_CONFIG_INVALID');
+      assert.equal(error.cause, undefined);
+      assert.equal(error.stack.includes(readToken), false);
+      return true;
+    });
+  }
+  const inherited = Object.assign(Object.create(enabled), environment(), credential);
+  assert.throws(() => loadCloudIngestConfig(inherited), { code: 'CLOUD_INGEST_CONFIG_INVALID' });
 });

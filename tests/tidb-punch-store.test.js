@@ -45,6 +45,8 @@ test('TiDB punch store atomically writes canonical punch, device user and proces
   assert.equal(result.punchId, '1');
   assert.equal(connection.calls.some((c) => c.sql?.includes('biometric_svc_punches')), true);
   assert.equal(connection.calls.some((c) => c.sql?.includes('biometric_svc_device_users')), true);
+  const userWrite = connection.calls.find(c => c.sql?.startsWith('INSERT INTO `biometric_svc_device_users`'));
+  assert.doesNotMatch(userWrite.sql.split('ON DUPLICATE KEY UPDATE')[1], /\bstatus\s*=/);
   assert.equal(connection.calls.some((c) => c.sql?.includes("status = 'processed'")), true);
   assert.equal(connection.calls.some((c) => c.type === 'commit'), true);
 });

@@ -9,13 +9,15 @@ This API belongs to the standalone biometric service. It does **not** connect to
 - Read-only: only `GET` is supported for Final Events.
 - Only rows with `status = 'final'` are returned.
 - No biometric templates/images, passwords, raw payloads, vendor metadata, internal `person_id`, source punch IDs, device IDs, device serials, or raw vendor values are exposed.
-- The API is disabled by default.
-- In this release the listener is deliberately loopback-only.
-- Event endpoints require an independent Bearer token of at least 32 characters.
+- The API is disabled by default in both runtimes.
+- Event endpoints require an independent Bearer token.
 - The token is never logged or returned by the API.
-- Remote/LAN exposure is prohibited in this release; TLS/network authorization is deferred until a separately approved integration-security design.
 
 ## Configuration
+
+### Standalone local listener
+
+The dedicated listener binds to loopback only.
 
 ```text
 BIOMETRIC_FINAL_EVENTS_API_ENABLED=false
@@ -25,6 +27,17 @@ BIOMETRIC_FINAL_EVENTS_API_TOKEN=
 ```
 
 When enabled, `BIOMETRIC_FINAL_EVENTS_API_TOKEN` is required and must contain at least 32 characters.
+
+### Cloud ingest listener
+
+The `database-ingest` runtime can serve the same read-only contract on its existing HTTPS domain. Keep the API disabled until a consumer is ready. Enable it with both variables below on the biometric service.
+
+```text
+BIOMETRIC_INGEST_CONSUMER_API_ENABLED=true
+BIOMETRIC_INGEST_CONSUMER_API_TOKEN=<43–128 base64url characters>
+```
+
+Use a randomly generated token distinct from all device credentials. Set `BIOMETRIC_SERVICE_API_URL` on the TolanHR backend to `https://<biometric-service-domain>/api/v1` and `BIOMETRIC_SERVICE_API_TOKEN` to the consumer token. The API returns already-finalized events. Its activation does not change which device movements become final events. Remove both cloud ingest variables and redeploy to disable the API.
 
 ## Endpoints
 

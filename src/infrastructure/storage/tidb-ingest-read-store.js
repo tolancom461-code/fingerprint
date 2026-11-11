@@ -7,8 +7,13 @@ export class TiDbIngestReadStore extends TiDbAdminReadStore {
   async getIntakeCounts() {
     const [rows] = await this.ingestReadPool.execute(`SELECT
       (SELECT COUNT(*) FROM \`${T.ingestEvents}\`) AS received,
-      (SELECT COUNT(*) FROM \`${T.deviceUsers}\`) AS device_users`);
-    return { received: Number(rows?.[0]?.received), deviceUsers: Number(rows?.[0]?.device_users) };
+      (SELECT COUNT(*) FROM \`${T.deviceUsers}\` WHERE status <> 'absent_from_device') AS device_users,
+      (SELECT COUNT(*) FROM \`${T.deviceUsers}\` WHERE status = 'absent_from_device') AS historical_device_users,
+      (SELECT COUNT(*) FROM \`${T.deviceUsers}\`) AS all_device_users`);
+    const row = rows?.[0];
+    const counts = rosterCounts(row?.device_users, row?.historical_device_users, row?.all_device_users);
+    return { received: Number(row?.received), deviceUsers: counts.current,
+      ...(counts.historical ? { historicalDeviceUsers: counts.historical, allDeviceUsers: counts.all } : {}) };
   }
 
   async pageReceivedPunches({ page, limit, search }) {
@@ -33,23 +38,40 @@ export class TiDbIngestReadStore extends TiDbAdminReadStore {
     return paged(items, counts?.[0]?.total, page, limit);
   }
 
-  async pageDeviceUsers({ page, limit, search }) {
+  async pageDeviceUsers({ page, limit, search, roster = 'current' }) {
     const paging = pagination(page, limit);
+    if (!['current', 'historical', 'all'].includes(roster)) throw invalid();
     const joins = `FROM \`${T.deviceUsers}\` u
       JOIN \`${T.devices}\` d ON d.id=u.device_id
       LEFT JOIN \`${T.personDeviceUsers}\` m ON m.device_user_row_id=u.id AND m.status='active'
       LEFT JOIN \`${T.people}\` p ON p.id=m.person_id`;
-    const where = search ? `WHERE (u.device_user_id LIKE ? ESCAPE '!' OR u.display_name LIKE ? ESCAPE '!' OR d.display_name LIKE ? ESCAPE '!' OR p.person_code LIKE ? ESCAPE '!')` : '';
+    const clauses = [];
+    if (roster === 'current') clauses.push("u.status <> 'absent_from_device'");
+    if (roster === 'historical') clauses.push("u.status = 'absent_from_device'");
+    if (search) clauses.push(`(u.device_user_id LIKE ? ESCAPE '!' OR u.display_name LIKE ? ESCAPE '!' OR d.display_name LIKE ? ESCAPE '!' OR p.person_code LIKE ? ESCAPE '!')`);
+    const where = clauses.length ? 'WHERE ' + clauses.join(' AND ') : '';
     const params = search ? Array(4).fill(like(search)) : [];
-    const [[items], [counts]] = await Promise.all([
+    const [[items], [counts], [rosterRows]] = await Promise.all([
       this.ingestReadPool.execute(`SELECT u.id,u.device_user_id,u.display_name,u.status,u.last_seen_at,
         COALESCE(d.display_name,d.serial_number) AS device_name,p.person_code AS mapped_person_code,p.display_name AS mapped_person_name
         ${joins} ${where} ORDER BY u.last_seen_at DESC,u.id DESC LIMIT ${paging.limit} OFFSET ${paging.offset}`, params),
-      this.ingestReadPool.execute(`SELECT COUNT(*) AS total ${joins} ${where}`, params)
+      this.ingestReadPool.execute(`SELECT COUNT(*) AS total ${joins} ${where}`, params),
+      this.ingestReadPool.execute(`SELECT COUNT(*) AS all_device_users,
+        COALESCE(SUM(status <> 'absent_from_device'),0) AS current_device_users,
+        COALESCE(SUM(status = 'absent_from_device'),0) AS historical_device_users FROM \`${T.deviceUsers}\``)
     ]);
-    return paged(items, counts?.[0]?.total, page, limit);
+    const totals = rosterCounts(rosterRows?.[0]?.current_device_users, rosterRows?.[0]?.historical_device_users, rosterRows?.[0]?.all_device_users);
+    return { ...paged(items, counts?.[0]?.total, page, limit), ...(totals.historical ? { rosterCounts: totals } : {}) };
   }
 }
+function rosterCounts(current, historical, all) {
+  const counts = { current: Number(current), historical: Number(historical), all: Number(all) };
+  if (Object.values(counts).some(value => !Number.isSafeInteger(value) || value < 0) || counts.current + counts.historical !== counts.all) {
+    throw Object.assign(new Error('Device roster counts are invalid'), { code: 'INGEST_PORTAL_DATA_INVALID' });
+  }
+  return counts;
+}
+function invalid() { return Object.assign(new TypeError('Invalid device roster filter'), { code: 'INVALID_INPUT', status: 400 }); }
 function like(value) { return `%${value.replace(/[!%_]/g, character => '!' + character)}%`; }
 function pagination(page, limit) {
   if (!Number.isSafeInteger(page) || page < 1 || page > 1000000 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) {

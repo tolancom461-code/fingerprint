@@ -6,7 +6,7 @@ test('intake list pagination does not bind unsupported floating-point LIMIT valu
   const calls = [];
   const store = new TiDbIngestReadStore({ async execute(sql, params = []) {
     calls.push({ sql, params });
-    if (sql.startsWith('SELECT COUNT')) return [[{ total: '0' }]];
+    if (sql.startsWith('SELECT COUNT')) return [[{ total: '0', current_device_users: '0', historical_device_users: '0', all_device_users: '0' }]];
     return [[]];
   } });
   for (const method of ['pageReceivedPunches', 'pageDeviceUsers']) {
