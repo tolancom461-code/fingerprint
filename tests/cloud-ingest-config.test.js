@@ -59,6 +59,19 @@ test('authentication, allowlist, remote TLS and safe intake bounds fail closed',
   assert.equal(local.database.sslMode, 'disabled');
 });
 
+test('user-profile pushes are disabled by default and scoped to distinct authorized devices', () => {
+  assert.deepEqual(loadCloudIngestConfig(environment()).userProfilePushDevices, []);
+  const config = loadCloudIngestConfig({ ...environment(),
+    BIOMETRIC_INGEST_ALLOWED_DEVICES: 'zkteco:FIXTURE-1,zkteco:FIXTURE-2',
+    BIOMETRIC_INGEST_USER_PROFILE_PUSH_DEVICES: 'zkteco:FIXTURE-2' });
+  assert.deepEqual(config.userProfilePushDevices, ['zkteco:FIXTURE-2']);
+  assert.ok(Object.isFrozen(config.userProfilePushDevices));
+  for (const value of ['*', 'zkteco:UNKNOWN', 'zkteco:FIXTURE-1,zkteco:FIXTURE-1', ' zkteco:FIXTURE-1',
+    'zkteco:FIXTURE-1,', ['zkteco:FIXTURE-1'], true]) {
+    rejects({ BIOMETRIC_INGEST_USER_PROFILE_PUSH_DEVICES: value });
+  }
+});
+
 test('native Basic credentials are optional, explicit machine credentials and preserve the existing cloud defaults', () => {
   const username = 'fixture.device-1';
   const password = 'B'.repeat(48);

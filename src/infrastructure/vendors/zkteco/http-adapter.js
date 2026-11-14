@@ -18,15 +18,17 @@ import {
 
 const VENDOR = 'zkteco';
 const PARSER_VERSION = 'zkteco-attlog-observer-v6';
+const USER_PROFILE_PUSH_PROTOCOL = '2.4.1';
 
 export class ZktecoAdmsAdapter {
-  constructor({ config, deviceRegistry, receivePunchBatch, diagnosticLog, deviceStore = null }) {
+  constructor({ config, deviceRegistry, receivePunchBatch, diagnosticLog, deviceStore = null, userProfilePushDevices = [] }) {
     this.vendor = VENDOR;
     this.config = config;
     this.deviceRegistry = deviceRegistry;
     this.receivePunchBatch = receivePunchBatch;
     this.diagnosticLog = diagnosticLog;
     this.deviceStore = deviceStore;
+    this.userProfilePushDevices = new Set(userProfilePushDevices);
   }
 
   matches(req) {
@@ -94,7 +96,9 @@ export class ZktecoAdmsAdapter {
     });
 
     if (req.method === 'GET' && request.pathname === '/iclock/cdata') {
-      return text(res, 200, buildHandshakeResponse(request.serialNumber, this.config.adms));
+      const requestUserProfiles = request.pushProtocolVersion === USER_PROFILE_PUSH_PROTOCOL &&
+        this.userProfilePushDevices.has(`${VENDOR}:${request.serialNumber}`);
+      return text(res, 200, buildHandshakeResponse(request.serialNumber, this.config.adms, { requestUserProfiles }));
     }
 
     if (req.method === 'POST' && request.pathname === '/iclock/cdata') {

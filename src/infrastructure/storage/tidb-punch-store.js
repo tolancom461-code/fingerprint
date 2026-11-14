@@ -1,6 +1,7 @@
 import { PunchStore } from '../../ports/punch-store.js';
 import { BIOMETRIC_TABLES } from './biometric-table-names.js';
 import { AUTOMATIC_FINALIZATION_PENDING_ISSUE } from '../../domain/finalization.js';
+import { listDeviceUserIdentities, lockDeviceForUserIdentity } from './tidb-device-store.js';
 
 const PUNCHES = BIOMETRIC_TABLES.punches;
 const PROCESSING = BIOMETRIC_TABLES.eventProcessing;
@@ -9,9 +10,10 @@ const DEVICES = BIOMETRIC_TABLES.devices;
 const ISSUES = BIOMETRIC_TABLES.finalizationIssues;
 
 export class TiDbPunchStore extends PunchStore {
-  constructor({ pool, retryDelaySeconds = 30 }) {
+  constructor({ pool, retryDelaySeconds = 30, deviceUserIdentityEnabled = false }) {
     super();
     this.pool = pool;
+    this.deviceUserIdentityEnabled = deviceUserIdentityEnabled;
     const delay = Number(retryDelaySeconds);
     if (!Number.isInteger(delay) || delay < 1 || delay > 3600) throw new Error('retryDelaySeconds must be between 1 and 3600');
     this.retryDelaySeconds = delay;
@@ -29,6 +31,7 @@ export class TiDbPunchStore extends PunchStore {
     const connection = await this.pool.getConnection();
     try {
       await connection.beginTransaction();
+      if (this.deviceUserIdentityEnabled) await lockDeviceForUserIdentity(connection, punch.deviceId);
       await connection.execute(
         `INSERT INTO \`${PROCESSING}\` (ingest_event_id, status)
          VALUES (?, 'pending')
@@ -50,6 +53,7 @@ export class TiDbPunchStore extends PunchStore {
 
       let inserted = false;
       let insertedPunchId = null;
+      const identity = this.deviceUserIdentityEnabled ? await identifyPunchUser(connection, punch) : null;
       try {
         const [insertResult] = await connection.execute(
           `INSERT INTO \`${PUNCHES}\` (
@@ -58,8 +62,8 @@ export class TiDbPunchStore extends PunchStore {
              device_id, vendor, serial_number, device_user_id, device_event_time_raw,
              device_event_time_local, device_timezone, device_event_time_utc,
              raw_status, punch_state, raw_verify, verification_method, work_code,
-             canonical_schema_version, vendor_metadata, wire_hash, parser_version, received_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+             canonical_schema_version, vendor_metadata, wire_hash, parser_version, received_at${this.deviceUserIdentityEnabled ? ', device_user_row_id' : ''}
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?${this.deviceUserIdentityEnabled ? ', ?' : ''})`,
           [
             punch.ingestEventId,
             punch.eventKey,
@@ -88,7 +92,8 @@ export class TiDbPunchStore extends PunchStore {
             }),
             punch.wireHash,
             punch.parserVersion,
-            toSqlDateTime(punch.receivedAt)
+            toSqlDateTime(punch.receivedAt),
+            ...(this.deviceUserIdentityEnabled ? [identity?.id ?? null] : [])
           ]
         );
         inserted = true;
@@ -111,13 +116,23 @@ export class TiDbPunchStore extends PunchStore {
         );
       }
 
-      await connection.execute(
-        `INSERT INTO \`${USERS}\` (
-           device_id, device_user_id, status, metadata_schema_version, first_seen_at, last_seen_at
-         ) VALUES (?, ?, 'seen', 1, ?, ?)
-         ON DUPLICATE KEY UPDATE last_seen_at = VALUES(last_seen_at)`,
-        [punch.deviceId, punch.deviceUserId, toSqlDateTime(punch.receivedAt), toSqlDateTime(punch.receivedAt)]
-      );
+      const receivedAt = toSqlDateTime(punch.receivedAt);
+      if (!this.deviceUserIdentityEnabled) {
+        await connection.execute(
+          `INSERT INTO \`${USERS}\` (
+             device_id, device_user_id, status, metadata_schema_version, first_seen_at, last_seen_at
+           ) VALUES (?, ?, 'seen', 1, ?, ?)
+           ON DUPLICATE KEY UPDATE last_seen_at = VALUES(last_seen_at)`,
+          [punch.deviceId, punch.deviceUserId, receivedAt, receivedAt]
+        );
+      } else if (inserted && identity && identity.status !== 'absent_from_device' && identity.identity_ended_at == null) {
+        await connection.execute(
+          `UPDATE \`${USERS}\`
+              SET last_seen_at = CASE WHEN last_seen_at IS NULL OR last_seen_at < ? THEN ? ELSE last_seen_at END
+            WHERE id = ? AND device_id = ? AND device_user_id = ?
+              AND identity_ended_at IS NULL AND status <> 'absent_from_device'`,
+          [receivedAt, receivedAt, identity.id, punch.deviceId, punch.deviceUserId]);
+      }
 
       await connection.execute(
         `UPDATE \`${DEVICES}\`
@@ -189,6 +204,44 @@ export class TiDbPunchStore extends PunchStore {
       // The durable ingest record remains authoritative even if retry metadata cannot be updated.
     }
   }
+}
+
+async function identifyPunchUser(connection, punch) {
+  let identities = await listDeviceUserIdentities(connection, punch.deviceId, punch.deviceUserId);
+  if (identities.length === 0) {
+    const receivedAt = toSqlDateTime(punch.receivedAt);
+    const [result] = await connection.execute(
+      `INSERT INTO \`${USERS}\` (device_id, device_user_id, status, metadata_schema_version, first_seen_at, last_seen_at)
+       VALUES (?, ?, 'seen', 1, ?, ?)`, [punch.deviceId, punch.deviceUserId, receivedAt, receivedAt]);
+    identities = [{ id: positiveIdText(result?.insertId, 'inserted device user id'), status: 'seen',
+      identity_started_at: null, identity_ended_at: null }];
+  }
+
+  const eventTime = orderedUtcTime(punch.deviceEventTimeUtc);
+  if (!eventTime) return null;
+  const candidates = [];
+  for (const identity of identities) {
+    const start = orderedUtcTime(identity.identity_started_at);
+    const end = orderedUtcTime(identity.identity_ended_at);
+    if ((identity.identity_started_at != null && !start) || (identity.identity_ended_at != null && !end) ||
+        (start && end && end <= start)) return null;
+    // Older archived rows may predate capture of their retirement time. Their unknown end cannot identify a punch.
+    if (identity.status === 'absent_from_device' && !end) continue;
+    // An open identity without a known start is safe only for a PIN with no recorded reuse.
+    if (!start && !end && identities.length > 1) continue;
+    if ((!start || eventTime >= start) && (!end || eventTime < end)) candidates.push(identity);
+  }
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
+function orderedUtcTime(value) {
+  if (typeof value !== 'string') return null;
+  const match = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?Z?$/.exec(value);
+  if (!match) return null;
+  const seconds = `${match[1]}T${match[2]}`;
+  const date = new Date(`${seconds}Z`);
+  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 19) !== seconds) return null;
+  return `${seconds}.${(match[3] ?? '').padEnd(6, '0')}`;
 }
 
 function positiveIdText(value, name) {

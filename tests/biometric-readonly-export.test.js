@@ -2,13 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { exportBiometricBackup } from '../scripts/lib/biometric-readonly-export.mjs';
 import { MIGRATION_TABLES, BACKUP_TABLES, canonicalRowsHash, deserializeRow } from '../scripts/lib/biometric-backup-format.mjs';
-import { REQUIRED_BIOMETRIC_COLUMNS } from '../src/infrastructure/storage/biometric-table-names.js';
+import { BIOMETRIC_TABLES, REQUIRED_BIOMETRIC_COLUMNS } from '../src/infrastructure/storage/biometric-table-names.js';
 
 const marker = 'biometric_portal_test_identity';
 const snapshotAt = '2026-11-09 12:34:56.123456';
 const secret = 'Synthetic private payload must not appear in errors';
 const keyFor = name => name === marker ? 'instance_id' : name === 'biometric_svc_event_processing' ? 'ingest_event_id' : 'id';
 const columnsFor = name => REQUIRED_BIOMETRIC_COLUMNS[name] ?? ['purpose', 'instance_id'];
+const generatedPinDdl = "`current_device_user_id` varchar(128) GENERATED ALWAYS AS ((case when (`status` = _utf8mb4'absent_from_device') then NULL else `device_user_id` end)) VIRTUAL";
 
 function fixture({ destination = false, pageRows = 1, ...overrides } = {}) {
   const names = destination ? BACKUP_TABLES : MIGRATION_TABLES;
@@ -32,6 +33,7 @@ function fixture({ destination = false, pageRows = 1, ...overrides } = {}) {
     const key = keyFor(name);
     const columns = columnsFor(name).map(column => `\`${column}\` ${column === key ? name === marker ? 'char(36)' : 'bigint unsigned' : 'text'}`);
     const suffix = name === marker || key === 'ingest_event_id' ? '' : ` AUTO_INCREMENT=${after ? state.afterCounter : state.beforeCounter}`;
+    if (state.generated?.table === name) columns.push(state.generated.ddl);
     let value = `CREATE TABLE \`${name}\` (${columns.join(', ')}, PRIMARY KEY (\`${key}\`)) ENGINE=InnoDB COMMENT='AUTO_INCREMENT=123'${suffix}`;
     if (after && state.changeDdl) value = state.changeDdl(name, value);
     return value;
@@ -46,10 +48,14 @@ function fixture({ destination = false, pageRows = 1, ...overrides } = {}) {
           TABLE_TYPE: state.viewTable === name ? 'VIEW' : 'BASE TABLE',
           AUTO_INCREMENT: name === marker || keyFor(name) === 'ingest_event_id' ? null : after ? state.afterCounter : state.beforeCounter })), []];
       }
-      if (sql.includes('FROM information_schema.COLUMNS')) return [names.flatMap(name => columnsFor(name)
-        .filter(column => !(state.omitColumn && name === names[0] && column === 'vendor'))
-        .map((column, index) => ({ TABLE_NAME: name, COLUMN_NAME: column, ORDINAL_POSITION: index + 1,
-          COLUMN_KEY: column === keyFor(name) ? 'PRI' : '', EXTRA: column === 'created_at' ? 'DEFAULT_GENERATED' : '' }))), []];
+      if (sql.includes('FROM information_schema.COLUMNS')) return [names.flatMap(name => {
+        const columns = columnsFor(name).filter(column => !(state.omitColumn && name === names[0] && column === 'vendor'));
+        const metadata = columns.map((column, index) => ({ TABLE_NAME: name, COLUMN_NAME: column, ORDINAL_POSITION: index + 1,
+          COLUMN_KEY: column === keyFor(name) ? 'PRI' : '', EXTRA: column === 'created_at' ? 'DEFAULT_GENERATED' : '' }));
+        if (state.generated?.table === name) metadata.push({ TABLE_NAME: name, COLUMN_NAME: state.generated.column,
+          ORDINAL_POSITION: metadata.length + 1, COLUMN_KEY: '', EXTRA: state.generated.extra });
+        return metadata;
+      }), []];
       if (sql.startsWith('SELECT DATE_FORMAT(NOW(6)')) return [[{ snapshot_at: state.clock }], []];
       const name = /FROM `(?:test|fingerprint)`\.`([^`]+)` AS OF TIMESTAMP/.exec(sql)?.[1];
       if (!name || !rowsByTable.has(name)) throw new Error('Unexpected synthetic read query');
@@ -153,6 +159,34 @@ test('standalone destination explicitly backs up ten copied tables without chang
   const invalid = fixture();
   await assert.rejects(invalid.run({ purpose: 'standalone-destination', schema: 'test' }), safeFailure('INPUT_INVALID'));
   assert.equal(invalid.state.calls.length, 0);
+});
+
+test('identity-aware backup retains the generated PIN DDL and hashes only writable columns', async () => {
+  const name = BIOMETRIC_TABLES.deviceUsers;
+  const f = fixture({ generated: { table: name, column: 'current_device_user_id', ddl: generatedPinDdl, extra: 'VIRTUAL GENERATED' } });
+  const manifest = await f.run({ purpose: 'standalone-destination', schema: 'fingerprint', settleMs: 0 });
+  const table = manifest.tables.find(row => row.name === name);
+  assert.equal(table.ddl.includes(generatedPinDdl), true);
+  assert.deepEqual(table.columns, columnsFor(name));
+  assert.equal(table.rowsSha256, canonicalRowsHash(table.columns, f.state.rowsByTable.get(name)));
+  assert.ok(f.state.calls.some(call => call.sql.startsWith('SELECT') && call.sql.includes(`\`${name}\` AS OF TIMESTAMP`) &&
+    !call.sql.includes('current_device_user_id')));
+  assert.equal(f.state.calls.filter(call => call.sql.startsWith('SELECT')).some(call => call.sql.includes('current_device_user_id')), false);
+});
+
+test('an unknown generated column or disagreement with the DDL is rejected before row capture', async () => {
+  const actual = { table: BIOMETRIC_TABLES.deviceUsers, column: 'current_device_user_id', ddl: generatedPinDdl, extra: 'VIRTUAL GENERATED' };
+  for (const change of [
+    { extra: '' },
+    { table: BIOMETRIC_TABLES.punches },
+    { ddl: generatedPinDdl.replace('absent_from_device', 'seen') },
+    { ddl: generatedPinDdl.replace('VIRTUAL', 'STORED'), extra: 'STORED GENERATED' }
+  ]) {
+    const f = fixture({ generated: { ...actual, ...change } });
+    await assert.rejects(f.run({ purpose: 'standalone-destination', schema: 'fingerprint', settleMs: 0 }));
+    assert.equal(f.state.calls.some(call => call.sql.includes(' AS OF TIMESTAMP ')), false);
+    assert.equal(f.state.files.size, 0);
+  }
 });
 
 test('unsafe source targets and incomplete metadata fail before snapshot reads or private writes', async () => {

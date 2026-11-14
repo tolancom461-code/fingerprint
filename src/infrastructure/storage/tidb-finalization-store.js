@@ -9,7 +9,10 @@ const FINAL_EVENTS = BIOMETRIC_TABLES.finalEvents;
 const ISSUES = BIOMETRIC_TABLES.finalizationIssues;
 
 export class TiDbFinalizationStore {
-  constructor(pool) { this.pool = pool; }
+  constructor(pool, { deviceUserIdentityEnabled = false } = {}) {
+    this.pool = pool;
+    this.deviceUserIdentityEnabled = deviceUserIdentityEnabled;
+  }
 
   async getPunchContext(punchId) {
     const id = normalizeId(punchId, 'punchId');
@@ -37,7 +40,7 @@ export class TiDbFinalizationStore {
          FROM \`${PUNCHES}\` p
          JOIN \`${DEVICES}\` d ON d.id = p.device_id
          LEFT JOIN \`${DEVICE_USERS}\` du
-           ON du.device_id = p.device_id
+           ON ${this.deviceUserIdentityEnabled ? 'du.id = p.device_user_row_id AND ' : ''}du.device_id = p.device_id
           AND du.device_user_id = p.device_user_id
          LEFT JOIN \`${MAPPINGS}\` m ON m.device_user_row_id = du.id
          LEFT JOIN \`${PEOPLE}\` person ON person.id = m.person_id

@@ -1,7 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { REQUIRED_BIOMETRIC_COLUMNS } from '../../src/infrastructure/storage/biometric-table-names.js';
 import {
-  MIGRATION_TABLES, BACKUP_TABLES, canonicalRowsHash, serializeRow, validateTableDdl
+  MIGRATION_TABLES, BACKUP_TABLES, backupGeneratedColumns, canonicalRowsHash, serializeRow
 } from './biometric-backup-format.mjs';
 
 const MARKER = 'biometric_portal_test_identity';
@@ -34,8 +34,8 @@ export async function exportBiometricBackup({ connection, schema, purpose, write
       if (!Array.isArray(rows) || rows.length !== 1 || rows[0]?.Table !== table || typeof rows[0]?.['Create Table'] !== 'string') {
         throw invalid('DDL_RESULT_INVALID');
       }
-      const ddl = validateTableDdl(rows[0]['Create Table'], table);
-      return { ddl, ...ddlStructure(ddl) };
+      const ddl = rows[0]['Create Table'];
+      return { ddl, generated: backupGeneratedColumns(ddl, table), ...ddlStructure(ddl) };
     };
 
     stage = 'read-metadata';
@@ -46,9 +46,9 @@ export async function exportBiometricBackup({ connection, schema, purpose, write
     const columnRows = await read(
       `SELECT TABLE_NAME, COLUMN_NAME, ORDINAL_POSITION, COLUMN_KEY, EXTRA FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN (${placeholders}) ORDER BY TABLE_NAME, ORDINAL_POSITION`,
       [schema, ...names]);
-    const columnsByTable = columnMetadata(columnRows, names);
     const before = new Map();
     for (const name of names) before.set(name, await ddlFor(name));
+    const columnsByTable = columnMetadata(columnRows, names, before);
 
     stage = 'read-clock';
     const clocks = await read(CLOCK_SQL);
@@ -131,23 +131,26 @@ function tableMetadata(rows, names) {
   return values;
 }
 
-function columnMetadata(rows, names) {
+function columnMetadata(rows, names, definitions) {
   const groups = new Map(names.map(name => [name, []]));
   for (const row of rows) {
     if (!row || !groups.has(row.TABLE_NAME) || typeof row.COLUMN_NAME !== 'string' ||
-        !/^[A-Za-z_][A-Za-z0-9_]*$/.test(row.COLUMN_NAME) ||
-        /\b(?:VIRTUAL|STORED)\s+GENERATED\b/i.test(String(row.EXTRA ?? ''))) throw invalid('COLUMN_METADATA_INVALID');
+        !/^[A-Za-z_][A-Za-z0-9_]*$/.test(row.COLUMN_NAME)) throw invalid('COLUMN_METADATA_INVALID');
     groups.get(row.TABLE_NAME).push(row);
   }
   const result = new Map();
   for (const [name, metadata] of groups) {
     const columns = metadata.map(row => row.COLUMN_NAME);
+    const generated = definitions.get(name).generated;
+    const generatedMetadata = metadata.filter(row => /\b(?:VIRTUAL|STORED)\s+GENERATED\b/i.test(String(row.EXTRA ?? '')));
     const required = REQUIRED_BIOMETRIC_COLUMNS[name] ?? ['purpose', 'instance_id'];
     const primary = metadata.filter(row => row.COLUMN_KEY === 'PRI').map(row => row.COLUMN_NAME);
     if (!columns.length || new Set(columns).size !== columns.length || required.some(column => !columns.includes(column)) ||
         metadata.some((row, index) => Number(row.ORDINAL_POSITION) !== index + 1) ||
+        generatedMetadata.length !== generated.length || generatedMetadata.some(row =>
+          !generated.includes(row.COLUMN_NAME) || !/^VIRTUAL GENERATED$/i.test(String(row.EXTRA ?? '').trim())) ||
         primary.length !== 1 || primary[0] !== keyFor(name)) throw invalid('COLUMN_METADATA_INVALID');
-    result.set(name, columns);
+    result.set(name, columns.filter(column => !generated.includes(column)));
   }
   return result;
 }

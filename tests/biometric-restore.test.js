@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { restoreBiometricBackup, verifyBiometricBackup } from '../scripts/lib/biometric-restore.mjs';
 import { MIGRATION_TABLES, serializeRow, canonicalRowsHash } from '../scripts/lib/biometric-backup-format.mjs';
+import { BIOMETRIC_TABLES } from '../src/infrastructure/storage/biometric-table-names.js';
 
 const marker = 'biometric_portal_test_identity';
 const instanceId = '30eb4402-70cf-45e1-a1b8-ed03a8aef7ce';
@@ -164,6 +165,33 @@ test('destination backup can restore its explicit marker and uses its UUID order
   assert.equal(report.tables.length, 11);
   assert.equal(destination.state.tables.get(marker)[0].instance_id, instanceId);
   assert.equal(destination.state.calls.some(call => call.sql === 'SELECT `purpose`,`instance_id` FROM `fingerprint`.`biometric_portal_test_identity` ORDER BY `instance_id`'), true);
+});
+
+test('standalone destination restore preserves generated PIN DDL and inserts only the writable snapshot values', async () => {
+  const fixture = backup({ purpose: 'standalone-destination' });
+  const name = BIOMETRIC_TABLES.deviceUsers;
+  const table = fixture.manifest.tables.find(row => row.name === name);
+  table.ddl = table.ddl.replace('PRIMARY KEY', "`current_device_user_id` varchar(128) GENERATED ALWAYS AS (CASE WHEN `status`='absent_from_device' THEN NULL ELSE `device_user_id` END) VIRTUAL, PRIMARY KEY");
+  const destination = target(fixture);
+  assert.equal((await restoreBiometricBackup(args(fixture, destination))).passed, true);
+  assert.equal(destination.state.definitions.get(name), table.ddl);
+  assert.equal(destination.state.calls.filter(call => call.sql.startsWith('INSERT')).some(call => call.sql.includes('current_device_user_id')), false);
+  assert.equal((await verifyBiometricBackup(args(fixture, destination))).passed, true);
+
+  table.columns.push('current_device_user_id');
+  const invalidTarget = target(fixture);
+  await assert.rejects(restoreBiometricBackup(args(fixture, invalidTarget)), { code: 'BIOMETRIC_RESTORE_DDL_REJECTED' });
+  assert.deepEqual(invalidTarget.state.calls, []);
+});
+
+test('a standalone destination manifest must include exactly the ten biometric tables', async () => {
+  for (const upsert of [fixture => fixture.manifest.tables.pop(), fixture => fixture.manifest.tables.push(backup({ purpose: 'destination' }).manifest.tables.at(-1))]) {
+    const fixture = backup({ purpose: 'standalone-destination' });
+    upsert(fixture);
+    const destination = target(fixture);
+    await assert.rejects(restoreBiometricBackup(args(fixture, destination)), { code: 'BIOMETRIC_RESTORE_TABLE_SET_INVALID' });
+    assert.deepEqual(destination.state.calls, []);
+  }
 });
 
 test('a temporary restore schema is allowed only when the selected database matches it', async () => {

@@ -10,7 +10,10 @@ const DEVICE_MODES = new Set(['test', 'live', 'maintenance']);
 const DEVICE_STATUSES = new Set(['active', 'inactive']);
 
 export class TiDbAdminReadStore {
-  constructor(pool) { this.pool = pool; }
+  constructor(pool, { deviceUserIdentityEnabled = false } = {}) {
+    this.pool = pool;
+    this.deviceUserIdentityEnabled = deviceUserIdentityEnabled;
+  }
 
   async getDashboard() {
     const [[deviceRows], [peopleRows], [unmappedRows], [issueRows], [eventRows]] = await Promise.all([
@@ -104,7 +107,7 @@ export class TiDbAdminReadStore {
          FROM \`${T.deviceUsers}\` u
          JOIN \`${T.devices}\` d ON d.id = u.device_id
          LEFT JOIN \`${T.personDeviceUsers}\` m ON m.device_user_row_id = u.id
-         LEFT JOIN \`${T.people}\` p ON p.person_code = u.device_user_id
+         LEFT JOIN \`${T.people}\` p ON ${this.deviceUserIdentityEnabled ? 'FALSE' : 'p.person_code = u.device_user_id'}
         WHERE m.id IS NULL
         ORDER BY u.last_seen_at DESC, u.id DESC
         LIMIT ${safeLimit}`
@@ -115,7 +118,7 @@ export class TiDbAdminReadStore {
   async listOpenIssues({ limit = 200 } = {}) {
     const safeLimit = boundedInteger(limit, 1, 500, 200);
     const [rows] = await this.pool.execute(
-      `${issueSelect()}
+      `${issueSelect(this.deviceUserIdentityEnabled)}
         WHERE i.status = 'open'
         ORDER BY i.last_seen_at DESC, i.id DESC
         LIMIT ${safeLimit}`
@@ -243,7 +246,7 @@ export class TiDbAdminReadStore {
     const from = `FROM \`${T.deviceUsers}\` u
       JOIN \`${T.devices}\` d ON d.id = u.device_id
       LEFT JOIN \`${T.personDeviceUsers}\` m ON m.device_user_row_id = u.id
-      LEFT JOIN \`${T.people}\` p ON p.person_code = u.device_user_id`;
+      LEFT JOIN \`${T.people}\` p ON ${this.deviceUserIdentityEnabled ? 'FALSE' : 'p.person_code = u.device_user_id'}`;
     const [[countRows], [rows]] = await Promise.all([
       this.pool.execute(`SELECT COUNT(*) AS total ${from} ${where}`, params),
       this.pool.execute(
@@ -280,11 +283,11 @@ export class TiDbAdminReadStore {
     }
     addDayRange(clauses, params, 'i.first_seen_at', filters.from, filters.to);
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
-    const joins = issueJoins();
+    const joins = issueJoins(this.deviceUserIdentityEnabled);
     const [[countRows], [rows]] = await Promise.all([
       this.pool.execute(`SELECT COUNT(*) AS total ${joins} ${where}`, params),
       this.pool.execute(
-        `${issueSelect()}
+        `${issueSelect(this.deviceUserIdentityEnabled)}
          ${where}
          ORDER BY i.last_seen_at DESC, i.id DESC
          LIMIT ${page.limit} OFFSET ${page.offset}`,
@@ -386,7 +389,7 @@ export class TiDbAdminReadStore {
       issueParams
     );
     const [recentIssueRows] = await this.pool.execute(
-      `${issueSelect()}
+      `${issueSelect(this.deviceUserIdentityEnabled)}
        ${issueWhere}
        ORDER BY i.last_seen_at DESC, i.id DESC
        LIMIT 12`,
@@ -422,7 +425,7 @@ export class TiDbAdminReadStore {
          FROM \`${T.finalizationIssues}\` i
          JOIN \`${T.punches}\` p ON p.id = i.source_punch_id
          JOIN \`${T.deviceUsers}\` du
-           ON du.device_id = p.device_id AND du.device_user_id = p.device_user_id
+           ON ${punchDeviceUserJoin(this.deviceUserIdentityEnabled)}
         WHERE i.status = 'open'
           AND i.issue_type = 'unmapped_device_user'
           AND du.id = ?
@@ -444,24 +447,28 @@ function eventSelect() {
             LEFT JOIN \`${T.devices}\` d ON d.id = f.device_id`;
 }
 
-function issueJoins() {
+function punchDeviceUserJoin(deviceUserIdentityEnabled) {
+  return `${deviceUserIdentityEnabled ? 'du.id = p.device_user_row_id AND ' : ''}du.device_id = p.device_id AND du.device_user_id = p.device_user_id`;
+}
+
+function issueJoins(deviceUserIdentityEnabled) {
   return `FROM \`${T.finalizationIssues}\` i
           JOIN \`${T.punches}\` p ON p.id = i.source_punch_id
           JOIN \`${T.devices}\` d ON d.id = p.device_id
           LEFT JOIN \`${T.deviceUsers}\` du
-            ON du.device_id = p.device_id AND du.device_user_id = p.device_user_id
+            ON ${punchDeviceUserJoin(deviceUserIdentityEnabled)}
           LEFT JOIN \`${T.personDeviceUsers}\` m ON m.device_user_row_id = du.id
           LEFT JOIN \`${T.people}\` person ON person.id = m.person_id`;
 }
 
-function issueSelect() {
+function issueSelect(deviceUserIdentityEnabled) {
   return `SELECT i.id, i.issue_type, i.status,
                  i.first_seen_at, i.last_seen_at, i.resolved_at, i.resolution_note,
                  p.device_id, p.device_user_id, p.punch_state,
                  p.device_event_time_local, p.device_timezone, p.device_event_time_utc,
                  d.vendor, d.serial_number, d.display_name AS device_display_name,
                  person.person_code, person.display_name AS person_name
-          ${issueJoins()}`;
+          ${issueJoins(deviceUserIdentityEnabled)}`;
 }
 
 function finalEventFilters(filters) {

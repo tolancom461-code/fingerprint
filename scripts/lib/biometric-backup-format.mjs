@@ -5,6 +5,7 @@ import { BIOMETRIC_TABLES } from '../../src/infrastructure/storage/biometric-tab
 // marker belongs to the test destination backup and is never a source table.
 export const MIGRATION_TABLES = Object.freeze(Object.values(BIOMETRIC_TABLES));
 export const BACKUP_TABLES = Object.freeze([...MIGRATION_TABLES, 'biometric_portal_test_identity']);
+const DERIVED_DEVICE_USER_PIN = 'current_device_user_id';
 
 export function encodeValue(value) {
   if (value === null) return { type: 'null' };
@@ -75,6 +76,64 @@ export function canonicalRowsHash(columns, rows) {
 }
 
 export function validateTableDdl(ddl, expectedTable) {
+  validatedDdlTokens(ddl, expectedTable);
+  return ddl;
+}
+
+// Verify the only derived field excluded from the writable row snapshots. The
+// complete column definition remains in the manifest's CREATE TABLE statement.
+export function backupGeneratedColumns(ddl, expectedTable) {
+  const tokens = validatedDdlTokens(ddl, expectedTable);
+  const generated = [];
+  let columnStart = 4;
+  let depth = 1;
+  for (let index = columnStart; index < tokens.length; index++) {
+    const token = tokens[index];
+    if (token.type !== 'symbol') continue;
+    if (depth === 1 && [',', ')'].includes(token.value)) {
+      const definition = tokens.slice(columnStart, index);
+      const generatedAt = generatedExpressionStart(definition);
+      if (generatedAt !== -1) {
+        const column = definition[0]?.value;
+        if (expectedTable !== BIOMETRIC_TABLES.deviceUsers || column !== DERIVED_DEVICE_USER_PIN ||
+            generated.includes(column) || !matchesDerivedPin(definition, generatedAt)) {
+          throw invalid('TABLE_DDL_GENERATED_COLUMN_REJECTED');
+        }
+        generated.push(column);
+      }
+      columnStart = index + 1;
+    }
+    if (token.value === '(') depth++;
+    else if (token.value === ')' && --depth === 0) break;
+  }
+  return generated;
+}
+
+function generatedExpressionStart(definition) {
+  let depth = 0;
+  for (let index = 1; index < definition.length; index++) {
+    const token = definition[index];
+    if (depth === 0 && word(token, 'AS') && definition[index + 1]?.type === 'symbol' &&
+        definition[index + 1].value === '(') return index;
+    if (token.type !== 'symbol') continue;
+    if (token.value === '(') depth++;
+    else if (token.value === ')') depth--;
+  }
+  return -1;
+}
+
+function matchesDerivedPin(definition, generatedAt) {
+  const type = definition.slice(1, generatedAt).map(token => token.value.toLowerCase()).join('');
+  if (!/^varchar\(128\)(?:charactersetutf8mb4)?(?:collateutf8mb4_bin)?(?:generatedalways)?$/.test(type)) return false;
+  const body = definition.slice(generatedAt + 1);
+  if (word(body.at(-1), 'VIRTUAL')) body.pop();
+  const expression = body.filter(token => !(token.type === 'symbol' && ['(', ')'].includes(token.value)) &&
+    !(token.type === 'word' && /^_(?:utf8mb4|utf8mb3|utf8|binary)$/i.test(token.value)));
+  return expression.map(token => token.type === 'string' ? `'${token.value}'` : token.value.toLowerCase()).join(' ') ===
+    "case when status = 'absent_from_device' then null else device_user_id end";
+}
+
+function validatedDdlTokens(ddl, expectedTable) {
   if (typeof ddl !== 'string' || !ddl.trim() || ddl.length > 1_000_000 || !BACKUP_TABLES.includes(expectedTable)) {
     throw invalid('TABLE_DDL_INVALID');
   }
@@ -108,7 +167,7 @@ export function validateTableDdl(ddl, expectedTable) {
     }
   }
   if (!outerClosed || depth !== 0) throw invalid('TABLE_DDL_INVALID');
-  return ddl;
+  return tokens;
 }
 
 function ddlTokens(sql, directive = false) {

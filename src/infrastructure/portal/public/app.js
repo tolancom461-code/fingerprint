@@ -5,9 +5,7 @@ const descriptions = {
   overview: ['نظرة عامة', 'ملخص الأجهزة والأشخاص والحركات في مساحة التجربة.'],
   devices: ['الأجهزة', 'نماذج أجهزة تجريبية. لا يوجد جهاز حقيقي متصل بهذه البوابة.'],
   people: ['الأشخاص', 'عرض الأشخاص واختبار إدارة سجل تجريبي معزول.'],
-  events: ['الحركات', 'أمثلة دخول وخروج للعرض فقط، بتوقيت الرياض.'],
-  'received-punches': ['الحركات المستلمة', 'سجلات الاستقبال وحالة معالجتها.'],
-  'device-users': ['مستخدمو الأجهزة', 'هويات المستخدمين المرسلة من الأجهزة.']
+  events: ['الحركات', 'أمثلة دخول وخروج للعرض فقط، بتوقيت الرياض.']
 };
 const databaseDescriptions = {
   overview: ['نظرة عامة', 'ملخص الأجهزة والأشخاص والحركات النهائية المحفوظة في قاعدة نظام البصمة.'],
@@ -15,29 +13,33 @@ const databaseDescriptions = {
   people: ['الأشخاص', 'الأشخاص المسجلون في نظام البصمة، للعرض فقط.'],
   events: ['الحركات النهائية', 'الحركات النهائية المحفوظة، بتوقيت الرياض. لا تشمل الحركات المعلقة.'],
   'received-punches': ['الحركات المستلمة', 'السجلات المحفوظة عند الاستقبال، بما فيها المعلقة وغير المرتبطة بشخص.'],
-  'device-users': ['مستخدمو الأجهزة', 'الهويات المسجلة من الأجهزة؛ ربطها بالأشخاص مستقل عن تسجيلها في الجهاز.']
+  'device-users': ['مستخدمو الأجهزة الحاليون', 'المستخدمون الحاليون في دليل الجهاز، مع إبقاء ربطهم بالأشخاص مستقلًا.'],
+  'historical-device-users': ['المستخدمون التاريخيون', 'هويات محفوظة لحركاتها السابقة وروابطها بالأشخاص.']
 };
+const deviceUserColumns = ['المستخدم', 'رقمه في الجهاز', 'الجهاز', 'القائمة', 'الشخص المرتبط', 'آخر ملاحظة'];
 const columns = {
   devices: ['الجهاز', 'الرقم التسلسلي', 'الطراز', 'حالة الاتصال', 'آخر اتصال'],
   people: ['الشخص', 'كود الشخص', 'الحالة'],
   events: ['الشخص', 'نوع الحركة', 'التوقيت · الرياض', 'طريقة التحقق', 'الجهاز'],
   'received-punches': ['رقم المستخدم في الجهاز', 'وقت الحركة', 'الجهاز', 'المعالجة', 'حدث نهائي'],
-  'device-users': ['المستخدم', 'رقمه في الجهاز', 'الجهاز', 'القائمة', 'الشخص المرتبط', 'آخر ملاحظة']
+  'device-users': deviceUserColumns,
+  'historical-device-users': deviceUserColumns
 };
-const deviceRosterDescriptions = {
-  current: ['مستخدمو الأجهزة الحاليون', 'المستخدمون الحاليون في دليل الجهاز، مع إبقاء ربطهم بالأشخاص مستقلًا.'],
-  historical: ['المستخدمون التاريخيون', 'معرّفات غير موجودة حاليًا في دليل الجهاز، ومحفوظة لحركاتها السابقة وروابطها بالأشخاص.'],
-  all: ['جميع هويات المستخدمين المحفوظة', 'المستخدمون الحاليون والهويات التاريخية المحفوظة، مع تمييز كل قائمة بوضوح.']
-};
+const deviceRosters = { 'device-users': 'current', 'historical-device-users': 'historical' };
 const numbers = new Intl.NumberFormat('ar-SA');
 const dates = new Intl.DateTimeFormat('ar-SA-u-ca-gregory', { timeZone: 'Asia/Riyadh', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-const state = { session: null, view: 'overview', pending: false, request: 0, list: null, deviceUserRoster: 'current', rosterCounts: null, searches: { devices: '', people: '', events: '', 'received-punches': '', 'device-users': '' }, pages: { devices: 1, people: 1, events: 1, 'received-punches': 1, 'device-users': 1 } };
+const state = {
+  session: null, view: 'overview', pending: false, request: 0, list: null,
+  searches: Object.fromEntries(Object.keys(columns).map(view => [view, ''])),
+  pages: Object.fromEntries(Object.keys(columns).map(view => [view, 1]))
+};
 let searchTimer;
 
 function isDemo() { return (state.session?.mode ?? document.body.dataset.portalMode) === 'demo'; }
 function hasReceivedRecords() { return state.session?.capabilities?.receivedRecords === true; }
 function allowedView(view) {
-  return Object.hasOwn(descriptions, view) && (!['received-punches', 'device-users'].includes(view) || hasReceivedRecords());
+  if (view === 'received-punches' || Object.hasOwn(deviceRosters, view)) return !isDemo() && hasReceivedRecords();
+  return Object.hasOwn(descriptions, view);
 }
 function canCreatePerson() {
   return state.session?.capabilities?.createPerson === true && state.session?.user.role === 'admin' && state.session?.mode === 'demo';
@@ -156,8 +158,7 @@ function setView(view) {
   clearTimeout(searchTimer);
   state.view = view;
   state.list = null;
-  const [title, description] = view === 'device-users' && hasReceivedRecords()
-    ? deviceRosterDescriptions[state.deviceUserRoster] : (isDemo() ? descriptions : databaseDescriptions)[view];
+  const [title, description] = (isDemo() ? descriptions : databaseDescriptions)[view];
   $('pageTitle').textContent = title;
   $('breadcrumb').textContent = title;
   $('pageDescription').textContent = description;
@@ -171,12 +172,11 @@ function setView(view) {
   $('overviewView').hidden = view !== 'overview';
   $('listView').hidden = view === 'overview';
   $('addPersonButton').hidden = view !== 'people' || !canCreatePerson();
-  $('deviceUserRosterControls').hidden = view !== 'device-users' || !hasReceivedRecords();
-  $('deviceUserRosterFilter').value = state.deviceUserRoster;
-  updateRosterSummary();
   if (view !== 'overview') {
     $('searchInput').value = state.searches[view];
-    $('searchInput').placeholder = view === 'people' ? 'ابحث بالاسم أو الكود…' : view === 'devices' ? 'ابحث باسم الجهاز أو رقمه…' : view === 'device-users' ? 'ابحث باسم المستخدم أو رقمه…' : 'ابحث في الحركات…';
+    const searchPlaceholders = { people: 'ابحث بالاسم أو الكود…', devices: 'ابحث باسم الجهاز أو رقمه…' };
+    $('searchInput').placeholder = Object.hasOwn(deviceRosters, view)
+      ? 'ابحث باسم المستخدم أو رقمه…' : searchPlaceholders[view] || 'ابحث في الحركات…';
     $('listTitle').textContent = title;
     $('tableCaption').textContent = `${title} · ${isDemo() ? 'بيانات تجريبية' : 'قراءة فقط'}`;
     const row = element('tr');
@@ -193,7 +193,6 @@ function setLoading(loading) {
   state.pending = loading;
   $('mainContent').setAttribute('aria-busy', String(loading));
   $('refreshButton').disabled = loading;
-  $('deviceUserRosterFilter').disabled = loading;
   $('tableStatus').hidden = !loading || state.view === 'overview';
   if (loading) {
     $('previousPage').disabled = true;
@@ -215,8 +214,9 @@ async function loadView({ preserveNotice = false } = {}) {
       $('lastUpdated').textContent = dates.format(new Date());
     } else {
       const parameters = new URLSearchParams({ page: String(state.pages[view]), limit: '10', search: state.searches[view] });
-      if (view === 'device-users') parameters.set('roster', state.deviceUserRoster);
-      const data = await api(`/api/portal/${view}?${parameters}`);
+      const roster = deviceRosters[view];
+      if (roster) parameters.set('roster', roster);
+      const data = await api(`/api/portal/${roster ? 'device-users' : view}?${parameters}`);
       if (request !== state.request) return;
       state.list = data;
       renderList(view, data);
@@ -256,22 +256,11 @@ function updateCounts(counts) {
 
 function setRosterCounts(counts) {
   if (!counts || !['current', 'historical', 'all'].every(key => Number.isSafeInteger(counts[key]) && counts[key] >= 0) || counts.current + counts.historical !== counts.all) return;
-  state.rosterCounts = counts;
   $('statDeviceUsers').textContent = numbers.format(counts.current);
   $('navDeviceUsersCount').textContent = numbers.format(counts.current);
+  $('navHistoricalDeviceUsersCount').textContent = numbers.format(counts.historical);
   $('statDeviceUsersRosterBreakdown').hidden = counts.historical === 0;
   $('statDeviceUsersRosterBreakdown').textContent = `تاريخيون محفوظون: ${numbers.format(counts.historical)} · جميع الهويات: ${numbers.format(counts.all)}`;
-  updateRosterSummary();
-}
-
-function updateRosterSummary() {
-  const visible = state.view === 'device-users' && hasReceivedRecords();
-  $('deviceUserRosterSummary').hidden = !visible;
-  if (!visible) return;
-  const counts = state.rosterCounts;
-  $('deviceUserRosterSummary').textContent = counts
-    ? `الحاليون: ${numbers.format(counts.current)} · التاريخيون المحفوظون: ${numbers.format(counts.historical)} · جميع الهويات المحفوظة: ${numbers.format(counts.all)}`
-    : 'تُعرض القائمة الحالية افتراضيًا. الهويات التاريخية محفوظة لحركاتها السابقة وروابطها بالأشخاص.';
 }
 
 function renderEmpty(title = 'لا توجد نتائج', detail = 'جرّب البحث بكلمة أخرى أو امسح البحث لعرض القائمة.') {
@@ -303,13 +292,19 @@ function renderList(view, data) {
   $('tableBody').replaceChildren();
   const items = Array.isArray(data.items) ? data.items : [];
   const total = Math.max(0, Number(data.page?.total) || 0);
-  if (view === 'device-users') {
-    if (data.rosterCounts) setRosterCounts(data.rosterCounts);
-    else if (state.deviceUserRoster === 'current' && !state.searches[view]) setRosterCounts({ current: total, historical: 0, all: total });
+  const roster = deviceRosters[view];
+  if (roster && data.rosterCounts) {
+    setRosterCounts(data.rosterCounts);
+  } else if (roster === 'current' && !state.searches[view]) {
+    setRosterCounts({ current: total, historical: 0, all: total });
+  } else if (roster) {
+    $('navHistoricalDeviceUsersCount').textContent = numbers.format(0);
+    $('statDeviceUsersRosterBreakdown').hidden = true;
   }
   const nouns = isDemo()
     ? { devices: 'جهاز تجريبي', people: 'شخص في مساحة التجربة', events: 'حركة تجريبية' }
-    : { devices: 'جهاز مسجل', people: 'شخص مسجل', events: 'حركة نهائية', 'received-punches': 'سجل استقبال', 'device-users': 'مستخدم جهاز' };
+    : { devices: 'جهاز مسجل', people: 'شخص مسجل', events: 'حركة نهائية', 'received-punches': 'سجل استقبال',
+      'device-users': 'مستخدم جهاز', 'historical-device-users': 'مستخدم تاريخي' };
   $('listTotal').textContent = `${numbers.format(total)} ${nouns[view]}`;
   if (!items.length) renderEmpty();
   for (const item of items) {
@@ -335,7 +330,7 @@ function renderList(view, data) {
       const statuses = { pending: 'بانتظار المعالجة', processing: 'تجري المعالجة', processed: 'محفوظة', retry: 'إعادة محاولة', not_applicable: 'تحتاج مراجعة' };
       cell(row).append(badge(item.parseValid ? statuses[item.processingStatus] || 'تحتاج مراجعة' : 'صيغة غير معتمدة'));
       cell(row).append(badge(item.hasFinalEvent ? 'محفوظ' : 'لم يُنشأ', item.hasFinalEvent ? 'badge-success' : 'badge-neutral'));
-    } else if (view === 'device-users') {
+    } else if (roster) {
       cell(row, item.displayName || 'بلا اسم', 'cell-primary');
       cell(row, item.deviceUserId || '—', 'cell-code');
       cell(row, item.deviceName || '—');
@@ -358,8 +353,10 @@ function renderList(view, data) {
     }
     $('tableBody').append(row);
   }
-  const nav = { devices: 'navDevicesCount', people: 'navPeopleCount', events: 'navEventsCount', 'received-punches': 'navReceivedCount', 'device-users': 'navDeviceUsersCount' }[view];
-  if (!state.searches[view] && (view !== 'device-users' || state.deviceUserRoster === 'current')) $(nav).textContent = numbers.format(total);
+  const nav = { devices: 'navDevicesCount', people: 'navPeopleCount', events: 'navEventsCount',
+    'received-punches': 'navReceivedCount', 'device-users': 'navDeviceUsersCount',
+    'historical-device-users': 'navHistoricalDeviceUsersCount' }[view];
+  if (!state.searches[view] && !roster) $(nav).textContent = numbers.format(total);
   updatePagination(data.page);
 }
 
@@ -397,12 +394,6 @@ $('sidebarBackdrop').addEventListener('click', () => toggleMenu(false));
 document.addEventListener('keydown', event => { if (event.key === 'Escape') toggleMenu(false); });
 $('searchForm').addEventListener('submit', event => { event.preventDefault(); clearTimeout(searchTimer); submitSearch(); });
 $('searchInput').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(submitSearch, 350); });
-$('deviceUserRosterFilter').addEventListener('change', () => {
-  if (!hasReceivedRecords() || !Object.hasOwn(deviceRosterDescriptions, $('deviceUserRosterFilter').value)) return;
-  state.deviceUserRoster = $('deviceUserRosterFilter').value;
-  state.pages['device-users'] = 1;
-  setView('device-users');
-});
 for (const [button, delta] of [['previousPage', -1], ['nextPage', 1]]) {
   $(button).addEventListener('click', () => {
     if (state.pending || !state.list?.page) return;

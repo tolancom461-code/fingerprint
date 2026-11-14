@@ -63,7 +63,8 @@ let webBridgePushService = null;
 if (config.storageMode === 'database') {
   databasePool = createBiometricDatabasePool(config.database);
   databaseReady = await assertBiometricDatabaseReady(databasePool, config.database.database);
-  deviceStore = new TiDbDeviceStore(databasePool);
+  const deviceUserIdentityEnabled = databaseReady.deviceUserIdentityEnabled === true;
+  deviceStore = new TiDbDeviceStore(databasePool, { deviceUserIdentityEnabled });
   ingestStore = new TiDbIngestStore({
     pool: databasePool,
     deviceStore,
@@ -72,20 +73,21 @@ if (config.storageMode === 'database') {
   });
   punchStore = new TiDbPunchStore({
     pool: databasePool,
-    retryDelaySeconds: config.database.retryDelaySeconds
+    retryDelaySeconds: config.database.retryDelaySeconds,
+    deviceUserIdentityEnabled
   });
 
-  finalizationStore = new TiDbFinalizationStore(databasePool);
+  finalizationStore = new TiDbFinalizationStore(databasePool, { deviceUserIdentityEnabled });
   finalizationService = new FinalizationService({ finalizationStore });
 
   if (config.admin.enabled) {
     const peopleStore = new TiDbPeopleStore(databasePool);
     const mappingStore = new TiDbPersonDeviceUserStore(databasePool);
     const auditStore = new TiDbAuditStore(databasePool);
-    const adminReadStore = new TiDbAdminReadStore(databasePool);
+    const adminReadStore = new TiDbAdminReadStore(databasePool, { deviceUserIdentityEnabled });
     const historicalReplayStore = new TiDbHistoricalReplayStore(databasePool);
     const historicalReplayService = new HistoricalFinalEventsReplayService({ replayStore: historicalReplayStore });
-    const managementService = new StandaloneManagementService({ peopleStore, mappingStore, auditStore });
+    const managementService = new StandaloneManagementService({ peopleStore, mappingStore, auditStore, deviceUserIdentityEnabled });
     const adminService = new StandaloneAdminService({ managementService, adminReadStore, finalizationService, historicalReplayService });
     adminServer = createAdminServer({ adminService, diagnosticLog });
   }

@@ -23,6 +23,9 @@ function fixture(overrides = {}) {
   const mappingStore = {
     async getDeviceUserByRowId(id) { return users.get(Number(id)) ?? null; },
     async getMappingByDeviceUserRowId(id) { return mappings.get(Number(id)) ?? null; },
+    async hasOtherIdentityForDeviceUser(user) {
+      return [...users.values()].some(row => row.id !== user.id && row.device_id === user.device_id && row.device_user_id === user.device_user_id);
+    },
     async createMapping(input) {
       if (mappings.has(Number(input.deviceUserRowId))) { const e = new Error('duplicate'); e.code = 'DEVICE_USER_MAPPING_CONFLICT'; throw e; }
       const row = { id: ++mappingId, person_id: input.personId, device_user_row_id: input.deviceUserRowId, status: input.status, active_from: 'now', active_to: null };
@@ -30,7 +33,7 @@ function fixture(overrides = {}) {
     }
   };
   const auditStore = { async append(entry) { audits.push(entry); return { id: audits.length }; } };
-  return { service: new StandaloneManagementService({ peopleStore, mappingStore, auditStore }), people, byCode, users, mappings, audits, ...overrides };
+  return { service: new StandaloneManagementService({ peopleStore, mappingStore, auditStore, ...overrides }), people, byCode, users, mappings, audits };
 }
 
 test('suggests device_user_id as person_code for an unmapped device user', async () => {
@@ -48,6 +51,20 @@ test('suggests an existing person when person_code already matches the device us
   const result = await f.service.suggestPersonForDeviceUser(7);
   assert.equal(result.state, 'existing_person_suggested');
   assert.equal(result.existingPerson.id, 99);
+});
+
+test('does not infer a person from an archived or reused number in identity mode', async () => {
+  const f = fixture({ deviceUserIdentityEnabled: true });
+  const former = { id: 99, person_code: '175', display_name: 'Former worker', status: 'active' };
+  f.people.set(former.id, former);
+  f.byCode.set(former.person_code, former);
+  f.users.set(8, { id: 8, device_id: 1, device_user_id: '175', status: 'absent_from_device' });
+  for (const deviceUserRowId of [7, 8]) {
+    await assert.rejects(f.service.createPersonAndMapSuggestedDeviceUser({ deviceUserRowId }),
+      { code: 'DEVICE_USER_EXPLICIT_PERSON_REQUIRED' });
+  }
+  assert.equal(f.mappings.size, 0);
+  assert.equal(f.audits.length, 0);
 });
 
 test('creates person and mapping with safe audit records', async () => {

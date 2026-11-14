@@ -1,6 +1,7 @@
 import { portalAccountsConfig } from './portal-accounts.js';
 import { normalizeBasicMachineCredentials } from '../infrastructure/ingest/basic-machine-credentials.js';
 import { normalizeConsumerApiConfig } from '../infrastructure/integration/consumer-api-credentials.js';
+import { normalizeUserProfilePushDevices } from '../infrastructure/ingest/user-profile-push-policy.js';
 
 export function loadCloudIngestConfig(env = process.env) {
   const host = env.BIOMETRIC_INGEST_HOST ?? '0.0.0.0';
@@ -25,7 +26,11 @@ export function loadCloudIngestConfig(env = process.env) {
   let portal;
   let basicCredentials = null;
   let consumerApi;
+  let userProfilePushDevices;
   try {
+    const profilePush = env.BIOMETRIC_INGEST_USER_PROFILE_PUSH_DEVICES;
+    if (profilePush !== undefined && typeof profilePush !== 'string') throw invalid();
+    userProfilePushDevices = normalizeUserProfilePushDevices(profilePush ? profilePush.split(',') : [], allowedDevices);
     if (Object.hasOwn(env, 'BIOMETRIC_INGEST_BASIC_USERNAME') || Object.hasOwn(env, 'BIOMETRIC_INGEST_BASIC_PASSWORD')) {
       basicCredentials = normalizeBasicMachineCredentials({
         username: env.BIOMETRIC_INGEST_BASIC_USERNAME,
@@ -40,7 +45,7 @@ export function loadCloudIngestConfig(env = process.env) {
     consumerApi = consumerApiConfig(env, token, basicCredentials?.password);
   } catch { throw invalid(); }
   return Object.freeze({ host, port: integer(env.PORT, 8080, 1, 65535), portal,
-    token, basicCredentials, consumerApi, allowedDevices: Object.freeze(allowedDevices),
+    token, basicCredentials, consumerApi, allowedDevices: Object.freeze(allowedDevices), userProfilePushDevices,
     maxBodyBytes: integer(env.BIOMETRIC_INGEST_MAX_BODY_BYTES, 524288, 1024, 524288),
     autoFinalizeNewPunches: false,
     retrySweepSeconds: integer(env.BIOMETRIC_INGEST_RETRY_SWEEP_SECONDS, 2, 1, 3600),

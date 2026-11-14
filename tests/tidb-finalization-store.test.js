@@ -2,6 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TiDbFinalizationStore } from '../src/infrastructure/storage/tidb-finalization-store.js';
 
+test('migrated finalization follows only the identity bound on the canonical punch', async () => {
+  const calls = [];
+  const pool = { async execute(sql, params) { calls.push({ sql, params }); return [[{ punch_id: 5, device_user_row_id: null }]]; } };
+  const store = new TiDbFinalizationStore(pool, { deviceUserIdentityEnabled: true });
+  const context = await store.getPunchContext(5);
+  assert.equal(context.device_user_row_id, null);
+  assert.match(calls[0].sql, /ON du.id = p.device_user_row_id AND du.device_id = p.device_id\s+AND du.device_user_id = p.device_user_id/);
+  assert.doesNotMatch(calls[0].sql, /\bOR\b/);
+});
+
 class FakePool {
   constructor(steps) { this.steps = [...steps]; this.calls = []; }
   async execute(sql, params = []) {

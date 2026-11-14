@@ -2,6 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TiDbAdminReadStore } from '../src/infrastructure/storage/tidb-admin-read-store.js';
 
+test('migrated admin reports keep movement issues and retry candidates scoped to the bound identity', async () => {
+  const calls = [];
+  const pool = { async execute(sql, params) { calls.push({ sql, params }); return [[]]; } };
+  const store = new TiDbAdminReadStore(pool, { deviceUserIdentityEnabled: true });
+  await store.listOpenIssues();
+  await store.listOpenUnmappedPunchIdsForDeviceUserRowId('10');
+  for (const call of calls) assert.match(call.sql, /ON du.id = p.device_user_row_id AND du.device_id = p.device_id AND du.device_user_id = p.device_user_id/);
+  assert.match(calls[1].sql, /AND du.id = \?/);
+  assert.deepEqual(calls[1].params, [10]);
+  await store.listUnmappedDeviceUsers();
+  assert.match(calls[2].sql, /LEFT JOIN `biometric_svc_people` p ON FALSE/);
+  assert.doesNotMatch(calls[2].sql, /p.person_code = u.device_user_id/);
+});
+
 function poolWith(responses) {
   const calls = [];
   return {

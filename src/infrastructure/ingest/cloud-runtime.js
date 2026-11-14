@@ -22,6 +22,7 @@ import { createCloudIngestPortalHandler } from '../portal/server.js';
 import { createAuthenticatedRegistry } from './authenticated-registry.js';
 import { createDeviceConnectionDiagnostics } from './device-connection-diagnostics.js';
 import { normalizeBasicMachineCredentials } from './basic-machine-credentials.js';
+import { normalizeUserProfilePushDevices } from './user-profile-push-policy.js';
 import { createFinalEventsApiHandler } from '../integration/final-events-api-server.js';
 import { normalizeConsumerApiConfig } from '../integration/consumer-api-credentials.js';
 
@@ -48,16 +49,17 @@ export async function startCloudIngest({ config, openDatabase = createIngestData
   let finalizationRetryLoop;
   const log = sanitizedLog(diagnosticLog);
   try {
-    const { basicCredentials, consumerApi } = validateRuntimeConfig(config);
+    const { basicCredentials, consumerApi, userProfilePushDevices } = validateRuntimeConfig(config);
     database = await openDatabase(config.database);
-    await database.checkReady();
+    const databaseReady = await database.checkReady();
+    const deviceUserIdentityEnabled = databaseReady?.deviceUserIdentityEnabled === true;
     const deviceRegistry = new EnvDeviceRegistry(config.allowedDevices);
     const connectionDiagnostics = createDeviceConnectionDiagnostics({ allowedDevices: config.allowedDevices });
-    const deviceStore = new TiDbDeviceStore(database);
+    const deviceStore = new TiDbDeviceStore(database, { deviceUserIdentityEnabled });
     const ingestStore = new TiDbIngestStore({ pool: database, deviceStore, replayLimit: config.replayLimit,
       autoFinalizeNewCaptures: config.autoFinalizeNewPunches });
-    const basePunchStore = new TiDbPunchStore({ pool: database, retryDelaySeconds: config.retryDelaySeconds });
-    const finalizationStore = new TiDbFinalizationStore(database);
+    const basePunchStore = new TiDbPunchStore({ pool: database, retryDelaySeconds: config.retryDelaySeconds, deviceUserIdentityEnabled });
+    const finalizationStore = new TiDbFinalizationStore(database, { deviceUserIdentityEnabled });
     const finalizationService = new FinalizationService({ finalizationStore });
     await ingestStore.init();
     await basePunchStore.init();
@@ -67,7 +69,7 @@ export async function startCloudIngest({ config, openDatabase = createIngestData
     }) : basePunchStore;
     const receivePunchBatch = new ReceivePunchBatch({ deviceRegistry, ingestStore, punchStore, diagnosticLog: log });
     const adapter = new ZktecoAdmsAdapter({ config: { adms: config.adms, maxBodyBytes: config.maxBodyBytes, attlogAckMode: 'ack' },
-      deviceRegistry, receivePunchBatch, diagnosticLog: log, deviceStore });
+      deviceRegistry, receivePunchBatch, diagnosticLog: log, deviceStore, userProfilePushDevices });
     const registry = createAuthenticatedRegistry({ registry: new VendorAdapterRegistry([adapter]), token: config.token,
       basicCredentials, diagnosticLog: log,
       rejectedRequestObserver: req => connectionDiagnostics.recordRejectedRequest(req) });
@@ -167,5 +169,6 @@ function validateRuntimeConfig(config) {
     ingestToken: config.token,
     basicPassword: basicCredentials?.password
   });
-  return { basicCredentials, consumerApi };
+  const userProfilePushDevices = normalizeUserProfilePushDevices(config.userProfilePushDevices, config.allowedDevices);
+  return { basicCredentials, consumerApi, userProfilePushDevices };
 }

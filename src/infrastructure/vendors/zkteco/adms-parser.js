@@ -5,10 +5,12 @@ const TIME_ONLY = /^\d{2}:\d{2}:\d{2}$/;
 export function parseAdmsRequestUrl(url) {
   const parsedUrl = new URL(url, 'http://biometric.local');
   const query = Object.fromEntries(parsedUrl.searchParams.entries());
+  const pushVersions = [...parsedUrl.searchParams].filter(([key]) => key.toLowerCase() === 'pushver');
   return {
     pathname: parsedUrl.pathname,
     serialNumber: getQueryCaseInsensitive(parsedUrl.searchParams, 'SN').trim(),
     table: getQueryCaseInsensitive(parsedUrl.searchParams, 'table').trim().toUpperCase(),
+    pushProtocolVersion: pushVersions.length === 1 ? pushVersions[0][1] : null,
     query
   };
 }

@@ -218,6 +218,29 @@ test('leased transactions preserve duplicate errors without destroying the trans
   await db.end();
 });
 
+test('device identity serialization only allows the exact one-row lock inside a transaction', async () => {
+  const f = fixture(); const db = await createIngestDatabase(config, { createPool: f.createPool });
+  const connection = await db.getConnection();
+  const sql = 'SELECT id FROM `biometric_svc_devices` WHERE id = ? FOR UPDATE';
+  const identities = 'SELECT id, status, identity_started_at, identity_ended_at FROM `biometric_svc_device_users` WHERE device_id = ? AND device_user_id = ? ORDER BY id FOR UPDATE';
+  const refused = { code: 'INGEST_DATABASE_QUERY_REJECTED' };
+  try {
+    await assert.rejects(db.execute(sql, ['1']), refused);
+    await assert.rejects(connection.execute(sql, ['1']), refused);
+    await assert.rejects(connection.execute(identities, ['1', '2']), refused);
+    await connection.beginTransaction();
+    await assert.rejects(connection.execute(sql, ['invalid']), refused);
+    await assert.rejects(connection.execute('SELECT id FROM `biometric_svc_devices` FOR UPDATE', []), refused);
+    await connection.execute(sql, ['1']);
+    assert.deepEqual(f.state.calls.at(-1).params, ['1']);
+    await assert.rejects(connection.execute(identities, ['1']), refused);
+    await connection.execute(identities, ['1', '2']);
+    assert.deepEqual(f.state.calls.at(-1).params, ['1', '2']);
+    await connection.rollback();
+    await assert.rejects(connection.execute(sql, ['1']), refused);
+  } finally { connection.release(); await db.end(); }
+});
+
 test('transaction failures are sanitized and discarded while a fresh operation can recover', async () => {
   const f = fixture(); const db = await createIngestDatabase(config, { createPool: f.createPool });
   const connection = await db.getConnection(); await connection.beginTransaction();

@@ -12,6 +12,8 @@ export const INGEST_TABLE_PRIVILEGES = Object.freeze(Object.fromEntries(Object.v
   .map(table => [table, Object.freeze(['SELECT', ...(WRITES.get(table) ?? [])])])));
 
 const METADATA_TABLES = new Set(['COLUMNS', 'TABLES', 'STATISTICS']);
+const DEVICE_ROW_LOCK = 'SELECT id FROM `biometric_svc_devices` WHERE id = ? FOR UPDATE';
+const DEVICE_IDENTITIES_LOCK = /^SELECT id, status, identity_started_at, identity_ended_at\s+FROM `biometric_svc_device_users` WHERE device_id = \? AND device_user_id = \? ORDER BY id FOR UPDATE$/;
 const ACCOUNT_PART = "(?:'(?:[^'\\\\]|\\\\.|'')*'|`(?:[^`]|``)*`)";
 const ACCOUNT = `${ACCOUNT_PART}\\s*@\\s*${ACCOUNT_PART}`;
 const USAGE_GRANT = new RegExp(`^GRANT\\s+USAGE\\s+ON\\s+\\*\\.\\*\\s+TO\\s+${ACCOUNT}$`, 'i');
@@ -33,6 +35,7 @@ export async function createIngestDatabase(config, { createPool = mysql.createPo
   } catch { throw safe('INGEST_DATABASE_UNAVAILABLE'); }
 
   let closed = false;
+  let initialIdentityMode;
   let ending;
   const acquisitions = new Set();
   const leases = new Set();
@@ -98,7 +101,18 @@ export async function createIngestDatabase(config, { createPool = mysql.createPo
 
     const exposed = Object.freeze({
       execute(sql, params = []) {
-        try { assertStatement(sql, params); } catch (error) { return Promise.reject(error); }
+        try {
+          const deviceLock = sql === DEVICE_ROW_LOCK;
+          const identityLock = typeof sql === 'string' && DEVICE_IDENTITIES_LOCK.test(sql);
+          if (deviceLock || identityLock) {
+            const deviceId = params?.[0];
+            if (!transaction || !Array.isArray(params) || params.length !== (deviceLock ? 1 : 2) ||
+                (typeof deviceId !== 'string' && !Number.isSafeInteger(deviceId)) || !/^[1-9]\d{0,19}$/.test(String(deviceId)) ||
+                (identityLock && (typeof params[1] !== 'string' || !params[1].length || params[1].length > 128 || params[1].includes('\0')))) {
+              throw safe('INGEST_DATABASE_QUERY_REJECTED');
+            }
+          } else assertStatement(sql, params);
+        } catch (error) { return Promise.reject(error); }
         return controller.executeTrusted(sql, params);
       },
       async beginTransaction() {
@@ -162,8 +176,17 @@ export async function createIngestDatabase(config, { createPool = mysql.createPo
       }
       const [grants] = await execute('SHOW GRANTS FOR CURRENT_USER()', [], true);
       assertGrants(grants);
-      try { await assertBiometricDatabaseReady({ execute }, 'fingerprint'); }
+      let schema;
+      try { schema = await assertBiometricDatabaseReady({ execute }, 'fingerprint'); }
       catch (error) { if (known(error)) throw error; throw safe('INGEST_DATABASE_SCHEMA_REJECTED'); }
+      if (schema.deviceUserIdentityEnabled) {
+        const [[server]] = await execute('SELECT VERSION() AS server_version');
+        if (typeof server?.server_version !== 'string') throw safe('INGEST_DATABASE_SCHEMA_REJECTED');
+        if (/tidb/i.test(server.server_version)) {
+          const [[mode]] = await execute('SELECT @@tidb_txn_mode AS transaction_mode');
+          if (String(mode?.transaction_mode ?? '').toLowerCase() !== 'pessimistic') throw safe('INGEST_DATABASE_SCHEMA_REJECTED');
+        }
+      }
       const [columns] = await execute(
         `SELECT DATA_TYPE,COLUMN_TYPE,IS_NULLABLE,COLUMN_DEFAULT FROM information_schema.COLUMNS
           WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
@@ -173,12 +196,16 @@ export async function createIngestDatabase(config, { createPool = mysql.createPo
           String(columns[0]?.IS_NULLABLE).toUpperCase() !== 'NO' || String(columns[0]?.COLUMN_DEFAULT) !== '0') {
         throw safe('INGEST_DATABASE_ELIGIBILITY_SCHEMA_REQUIRED');
       }
-      return { ready: true };
+      return { ready: true, ...(schema.deviceUserIdentityEnabled ? { deviceUserIdentityEnabled: true } : {}) };
     } finally { lease.exposed.release(); }
   }
 
   async function checkReady() {
-    try { return await guard(); }
+    try {
+      const result = await guard();
+      if (result.deviceUserIdentityEnabled !== initialIdentityMode) throw safe('INGEST_DATABASE_SCHEMA_REJECTED');
+      return result;
+    }
     catch (error) {
       if (['INGEST_DATABASE_IDENTITY_REJECTED', 'INGEST_DATABASE_GRANTS_REJECTED', 'INGEST_DATABASE_SCHEMA_REJECTED',
         'INGEST_DATABASE_ELIGIBILITY_SCHEMA_REQUIRED'].includes(error?.code)) await end().catch(() => {});
@@ -186,7 +213,7 @@ export async function createIngestDatabase(config, { createPool = mysql.createPo
     }
   }
 
-  try { await guard(); }
+  try { initialIdentityMode = (await guard()).deviceUserIdentityEnabled; }
   catch (error) { await end().catch(() => {}); throw known(error) ? error : safe('INGEST_DATABASE_UNAVAILABLE'); }
   return Object.freeze({
     async execute(sql, params = []) {

@@ -32,6 +32,14 @@ export class TiDbPersonDeviceUserStore {
     return rows?.[0] ?? null;
   }
 
+  async hasOtherIdentityForDeviceUser(user) {
+    const [rows] = await this.pool.execute(
+      `SELECT id FROM \`${U}\` WHERE device_id = ? AND device_user_id = ? AND id <> ? LIMIT 1`,
+      [normalizeId(user.device_id, 'deviceId'), requiredText(user.device_user_id, 'deviceUserId', 128), normalizeId(user.id, 'deviceUserRowId')]
+    );
+    return rows.length > 0;
+  }
+
   async createMapping({ personId, deviceUserRowId, status = 'active', activeFrom = null }) {
     const safePersonId = normalizeId(personId, 'personId');
     const safeDeviceUserRowId = normalizeId(deviceUserRowId, 'deviceUserRowId');

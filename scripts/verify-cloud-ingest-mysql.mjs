@@ -44,6 +44,7 @@ export async function verifyCloudIngestMysql() {
       BIOMETRIC_INGEST_DB_PORT: String(lab.port), BIOMETRIC_INGEST_DB_USER: user, BIOMETRIC_INGEST_DB_PASSWORD: password,
       BIOMETRIC_INGEST_DB_NAME: 'fingerprint', BIOMETRIC_INGEST_DB_CONFIRMED_NAME: 'fingerprint', BIOMETRIC_INGEST_DB_SSL_MODE: 'disabled',
       BIOMETRIC_INGEST_TOKEN: token, BIOMETRIC_INGEST_ALLOWED_DEVICES: `zkteco:${serial}`,
+      BIOMETRIC_INGEST_USER_PROFILE_PUSH_DEVICES: `zkteco:${serial}`,
       BIOMETRIC_INGEST_BASIC_USERNAME: basicUsername, BIOMETRIC_INGEST_BASIC_PASSWORD: basicPassword,
       BIOMETRIC_PORTAL_ORIGIN: base, BIOMETRIC_PORTAL_ADMIN_USERNAME: 'local-cloud-test', BIOMETRIC_PORTAL_ADMIN_PASSWORD_HASH: await hashPassword(portalPassword) };
     const config = loadCloudIngestConfig(env);
@@ -95,6 +96,10 @@ export async function verifyCloudIngestMysql() {
     assert.equal((await request(postPath, { method: 'POST', headers: machineHeaders, body: batch })).status, 200);
     assert.equal(await rawCount(), 2);
     check('bearer-retry-deduplicates-basic-authenticated-attendance');
+    const handshake = await request(`/iclock/cdata?SN=${serial}&options=all&pushver=2.4.1`, { headers: basicHeaders });
+    assert.equal(handshake.status, 200);
+    assert.ok((await handshake.text()).split('\n').includes('TransFlag=TransData AttLog\tOpLog\tEnrollUser\tChgUser'));
+    check('native-basic-handshake-requests-only-attendance-operation-logs-and-user-profiles');
     const operationPath = `/iclock/cdata?SN=${serial}&table=OPERLOG`;
     const templateMarker = `SYNTHETIC-TEMPLATE-${randomBytes(20).toString('hex')}`;
     const operationBody = ['USER PIN=NEW-TEST-2\tName=Synthetic device user\tPri=0\tPasswd=do-not-store\tCard=do-not-store\tGrp=1\tTZ=0000000100000000',
@@ -104,6 +109,15 @@ export async function verifyCloudIngestMysql() {
     assert.equal(await operation.text(), 'OK');
     assert.equal(await rawCount(), 2);
     check('basic-operlog-accepts-safe-profile-and-discards-template-and-credential-values');
+    const updatedName = 'Synthetic renamed device user';
+    const updatedOperationBody = operationBody.replace('Synthetic device user', updatedName);
+    const updatedOperation = await request(operationPath, { method: 'POST', headers: basicHeaders, body: updatedOperationBody });
+    assert.equal(updatedOperation.status, 200);
+    assert.equal(await updatedOperation.text(), 'OK');
+    const [[updatedUser]] = await lab.sql(`SELECT display_name FROM \`${T.deviceUsers}\` WHERE device_user_id = ?`, ['NEW-TEST-2']);
+    assert.equal(updatedUser.display_name, updatedName);
+    assert.equal(await rawCount(), 2);
+    check('basic-operlog-profile-rename-updates-only-the-device-user-name');
     const login = await request('/auth/login', { method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: 'local-cloud-test', password: portalPassword }) });
     assert.equal(login.status, 200);
@@ -144,6 +158,7 @@ export async function verifyCloudIngestMysql() {
     const userRecords = await users.json();
     assert.equal(userRecords.page.total, 2);
     assert.ok(userRecords.items.every(item => item.mappedPersonCode === null));
+    assert.equal(userRecords.items.find(item => item.deviceUserId === 'NEW-TEST-2')?.displayName, updatedName);
     assert.ok(!JSON.stringify(userRecords).includes('do-not-store'));
     const [[storedSecrets]] = await lab.sql(`SELECT COUNT(*) AS total FROM \`${T.deviceUsers}\` WHERE CAST(safe_metadata AS CHAR) LIKE '%do-not-store%'`);
     assert.equal(Number(storedSecrets.total), 0);
@@ -187,7 +202,7 @@ export async function verifyCloudIngestMysql() {
     for (const authHeaders of [basicHeaders, machineHeaders]) {
       const resend = await request(postPath, { method: 'POST', headers: authHeaders, body: batch });
       assert.equal(resend.status, 200); assert.equal(await resend.text(), 'OK: 2');
-      const userResend = await request(operationPath, { method: 'POST', headers: authHeaders, body: operationBody });
+      const userResend = await request(operationPath, { method: 'POST', headers: authHeaders, body: updatedOperationBody });
       assert.equal(userResend.status, 200); assert.equal(await userResend.text(), 'OK');
       assert.deepEqual(await tableCounts(), countsBeforeResends);
     }

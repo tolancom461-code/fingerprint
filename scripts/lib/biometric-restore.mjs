@@ -1,5 +1,5 @@
 import {
-  MIGRATION_TABLES, BACKUP_TABLES, deserializeRow, canonicalRowsHash, validateTableDdl
+  MIGRATION_TABLES, BACKUP_TABLES, backupGeneratedColumns, deserializeRow, canonicalRowsHash, validateTableDdl
 } from './biometric-backup-format.mjs';
 
 const MARKER = 'biometric_portal_test_identity';
@@ -64,14 +64,15 @@ function validateTarget(connection, schema) {
 
 async function prepareBackup(manifest, readRowsFile) {
   if (!manifest || manifest.format !== 'biometric-backup-v1' ||
-      !['source', 'destination'].includes(manifest.purpose) ||
+      !['source', 'destination', 'standalone-destination'].includes(manifest.purpose) ||
       manifest.schema !== (manifest.purpose === 'source' ? 'test' : 'fingerprint') ||
       typeof manifest.snapshotAt !== 'string' || !manifest.snapshotAt ||
       !Array.isArray(manifest.tables) || !manifest.tables.length || typeof readRowsFile !== 'function') {
     throw invalid('BIOMETRIC_RESTORE_MANIFEST_INVALID');
   }
-  const allowed = manifest.purpose === 'source' ? MIGRATION_TABLES : BACKUP_TABLES;
-  if (manifest.tables.length > allowed.length || (manifest.purpose === 'source' && manifest.tables.length !== MIGRATION_TABLES.length)) {
+  const fullDirectory = manifest.purpose !== 'destination';
+  const allowed = fullDirectory ? MIGRATION_TABLES : BACKUP_TABLES;
+  if (manifest.tables.length > allowed.length || (fullDirectory && manifest.tables.length !== allowed.length)) {
     throw invalid('BIOMETRIC_RESTORE_TABLE_SET_INVALID');
   }
   const seen = new Set();
@@ -90,11 +91,14 @@ async function prepareBackup(manifest, readRowsFile) {
         (table.name !== MARKER && table.maxKey !== null && (typeof table.maxKey !== 'string' || !INTEGER.test(table.maxKey)))) {
       throw invalid('BIOMETRIC_RESTORE_TABLE_INVALID');
     }
-    try { validateTableDdl(table.ddl, table.name); }
+    try {
+      const generated = backupGeneratedColumns(table.ddl, table.name);
+      if (generated.some(column => table.columns.includes(column))) throw invalid('BIOMETRIC_RESTORE_DDL_REJECTED');
+    }
     catch { throw invalid('BIOMETRIC_RESTORE_DDL_REJECTED'); }
     seen.add(table.name);
   }
-  if (manifest.purpose === 'source' && MIGRATION_TABLES.some(table => !seen.has(table))) throw invalid('BIOMETRIC_RESTORE_TABLE_SET_INVALID');
+  if (fullDirectory && MIGRATION_TABLES.some(table => !seen.has(table))) throw invalid('BIOMETRIC_RESTORE_TABLE_SET_INVALID');
 
   // Capture validated definitions before awaiting caller-owned file callbacks.
   const definitions = manifest.tables.map(table => ({ ...table, columns: [...table.columns] }));

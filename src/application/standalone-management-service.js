@@ -1,8 +1,9 @@
 export class StandaloneManagementService {
-  constructor({ peopleStore, mappingStore, auditStore }) {
+  constructor({ peopleStore, mappingStore, auditStore, deviceUserIdentityEnabled = false }) {
     this.peopleStore = peopleStore;
     this.mappingStore = mappingStore;
     this.auditStore = auditStore;
+    this.deviceUserIdentityEnabled = deviceUserIdentityEnabled;
   }
 
   async suggestPersonForDeviceUser(deviceUserRowId) {
@@ -10,6 +11,10 @@ export class StandaloneManagementService {
     if (!user) return null;
     const mapping = await this.mappingStore.getMappingByDeviceUserRowId(deviceUserRowId);
     if (mapping) return { state: 'mapped', user, mapping };
+    if (this.deviceUserIdentityEnabled && (user.status === 'absent_from_device' ||
+        await this.mappingStore.hasOtherIdentityForDeviceUser(user))) {
+      return { state: 'explicit_person_required', user, existingPerson: null, suggestedPersonCode: null };
+    }
 
     const suggestedPersonCode = String(user.device_user_id ?? '').trim();
     const existingPerson = suggestedPersonCode
@@ -69,6 +74,9 @@ export class StandaloneManagementService {
     const suggestion = await this.suggestPersonForDeviceUser(deviceUserRowId);
     if (!suggestion) throw codedError('DEVICE_USER_NOT_FOUND', `device user not found: ${deviceUserRowId}`);
     if (suggestion.state === 'mapped') return { person: suggestion.existingPerson ?? null, mapping: suggestion.mapping, createdPerson: false, createdMapping: false };
+    if (suggestion.state === 'explicit_person_required') {
+      throw codedError('DEVICE_USER_EXPLICIT_PERSON_REQUIRED', 'Choose an explicit person for an archived or reused device user number');
+    }
 
     let person = suggestion.existingPerson;
     let createdPerson = false;

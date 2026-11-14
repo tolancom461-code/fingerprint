@@ -60,13 +60,16 @@ function configuration(port) {
     retrySweepSeconds: 1, retryDelaySeconds: 1, replayLimit: 1000,
     adms: { delaySeconds: 10, errorDelaySeconds: 60, realtime: 1, encrypt: 0 } };
 }
-async function start(t, { includeViewer = false, retrySweepSeconds = 1, basicCredentials, consumerApi } = {}) {
+async function start(t, { includeViewer = false, retrySweepSeconds = 1, basicCredentials, consumerApi,
+  allowedDevices, userProfilePushDevices } = {}) {
   const fixture = fakeDatabase();
   const logs = [];
   const config = configuration(await freePort());
   config.retrySweepSeconds = retrySweepSeconds;
   if (basicCredentials !== undefined) config.basicCredentials = basicCredentials;
   if (consumerApi !== undefined) config.consumerApi = consumerApi;
+  if (allowedDevices !== undefined) config.allowedDevices = allowedDevices;
+  if (userProfilePushDevices !== undefined) config.userProfilePushDevices = userProfilePushDevices;
   if (includeViewer) config.portal.users.push({ username: 'test-viewer', passwordHash, role: 'viewer' });
   const runtime = await startCloudIngest({ config, openDatabase: async settings => {
     assert.equal(settings, config.database); return fixture.database;
@@ -76,6 +79,41 @@ async function start(t, { includeViewer = false, retrySweepSeconds = 1, basicCre
 }
 function writes(state) { return state.calls.filter(call => !/^\s*SELECT\b/.test(call.sql)); }
 function basicAuthorization(username, value) { return `Basic ${Buffer.from(`${username}:${value}`, 'ascii').toString('base64')}`; }
+
+test('authorized profile-push negotiation changes only the transfer flags for the opted-in protocol and device', async t => {
+  const lab = await start(t, { allowedDevices: ['zkteco:TEST-DEVICE', 'zkteco:OTHER-DEVICE'],
+    userProfilePushDevices: ['zkteco:TEST-DEVICE'] });
+  const auth = { Authorization: `Bearer ${token}` };
+  const optedIn = '/iclock/cdata?SN=TEST-DEVICE&options=all&pushver=2.4.1';
+  const unauthenticated = await fetch(lab.base + optedIn);
+  assert.equal(unauthenticated.status, 401);
+  assert.doesNotMatch(await unauthenticated.text(), /TransFlag/);
+  assert.deepEqual(writes(lab.state), []);
+
+  async function handshake(query) {
+    const response = await fetch(lab.base + query, { headers: auth });
+    assert.equal(response.status, 200);
+    return response.text();
+  }
+  const baseline = await handshake('/iclock/cdata?SN=TEST-DEVICE&options=all');
+  assert.match(baseline, /^TransFlag=1111000000$/m);
+  assert.equal(await handshake(optedIn), baseline.replace('TransFlag=1111000000',
+    'TransFlag=TransData AttLog\tOpLog\tEnrollUser\tChgUser'));
+  for (const version of ['2.2.14', '2.4.1%20', '9.9.9', '2.4.1&PUSHVER=2.4.1']) {
+    assert.equal(await handshake(`/iclock/cdata?SN=TEST-DEVICE&options=all&pushver=${version}`), baseline);
+  }
+  assert.equal(await handshake('/iclock/cdata?SN=OTHER-DEVICE&options=all&pushver=2.4.1'),
+    baseline.replace('GET OPTION FROM: TEST-DEVICE', 'GET OPTION FROM: OTHER-DEVICE'));
+});
+
+test('runtime rejects profile-push devices outside its allowlist before opening a database', async () => {
+  const config = configuration(0);
+  config.userProfilePushDevices = ['zkteco:NOT-ALLOWED'];
+  let opened = false;
+  await assert.rejects(startCloudIngest({ config, openDatabase: async () => { opened = true; },
+    diagnosticLog: { async write() {} } }), { code: 'CLOUD_INGEST_START_FAILED' });
+  assert.equal(opened, false);
+});
 async function login(lab, username = 'test-admin') {
   const response = await fetch(lab.base + '/auth/login', { method: 'POST',
     headers: { Origin: lab.base, 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });

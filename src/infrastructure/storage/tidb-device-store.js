@@ -2,10 +2,29 @@ import { createDeviceIdentity } from '../../domain/device-identity.js';
 import { BIOMETRIC_TABLES } from './biometric-table-names.js';
 
 const T = BIOMETRIC_TABLES.devices;
+const USERS = BIOMETRIC_TABLES.deviceUsers;
+
+// All writes to a device's user identities acquire the same device lock first.
+export async function lockDeviceForUserIdentity(connection, deviceId) {
+  const [rows] = await connection.execute(
+    'SELECT id FROM `biometric_svc_devices` WHERE id = ? FOR UPDATE', [deviceId]);
+  if (!Array.isArray(rows) || rows.length !== 1 || String(rows[0].id) !== String(deviceId)) {
+    throw new Error('Device user identity lock unavailable');
+  }
+}
+
+export async function listDeviceUserIdentities(connection, deviceId, deviceUserId) {
+  const [rows] = await connection.execute(
+    `SELECT id, status, identity_started_at, identity_ended_at
+       FROM \`${USERS}\` WHERE device_id = ? AND device_user_id = ? ORDER BY id FOR UPDATE`,
+    [deviceId, deviceUserId]);
+  return rows;
+}
 
 export class TiDbDeviceStore {
-  constructor(pool) {
+  constructor(pool, { deviceUserIdentityEnabled = false } = {}) {
     this.pool = pool;
+    this.deviceUserIdentityEnabled = deviceUserIdentityEnabled;
   }
 
   async observe({ device, remoteAddress = null, observedAt, eventAt = null, metadata = null }) {
@@ -73,6 +92,7 @@ export class TiDbDeviceStore {
     const row = await this.get(device);
     if (!row) throw new Error('device must exist before device users can be stored');
     const users = extractSafeUsers(records);
+    if (this.deviceUserIdentityEnabled) return this.#storeUnversionedUsers(row.id, users, observedAt);
     for (const user of users) {
       await this.pool.execute(
         `INSERT INTO \`${BIOMETRIC_TABLES.deviceUsers}\` (
@@ -88,6 +108,46 @@ export class TiDbDeviceStore {
       );
     }
     return { deviceId: row.id, userCount: users.length };
+  }
+
+  async #storeUnversionedUsers(deviceId, users, observedAt) {
+    if (!users.length) return { deviceId, userCount: 0 };
+    const connection = await this.pool.getConnection();
+    let userCount = 0;
+    try {
+      await connection.beginTransaction();
+      await lockDeviceForUserIdentity(connection, deviceId);
+      for (const user of users) {
+        const identities = await listDeviceUserIdentities(connection, deviceId, user.deviceUserId);
+        if (identities.length === 0) {
+          await connection.execute(
+            `INSERT INTO \`${USERS}\` (device_id, device_user_id, display_name, status,
+               metadata_schema_version, safe_metadata, first_seen_at, last_seen_at)
+             VALUES (?, ?, ?, 'seen', 1, ?, ?, ?)`,
+            [deviceId, user.deviceUserId, user.displayName, jsonOrNull(user.metadata), observedAt, observedAt]);
+          userCount++;
+          continue;
+        }
+        // USER carries a PIN and profile, but no reliable enrollment identity or revision.
+        const [identity] = identities;
+        if (identities.length !== 1 || identity.status === 'absent_from_device' || identity.identity_ended_at != null) continue;
+        await connection.execute(
+          `UPDATE \`${USERS}\`
+              SET display_name = COALESCE(?, display_name), safe_metadata = COALESCE(?, safe_metadata),
+                  last_seen_at = CASE WHEN last_seen_at IS NULL OR last_seen_at < ? THEN ? ELSE last_seen_at END
+            WHERE id = ? AND device_id = ? AND device_user_id = ?
+              AND identity_ended_at IS NULL AND status <> 'absent_from_device'`,
+          [user.displayName, jsonOrNull(user.metadata), observedAt, observedAt, identity.id, deviceId, user.deviceUserId]);
+        userCount++;
+      }
+      await connection.commit();
+      return { deviceId, userCount };
+    } catch (error) {
+      try { await connection.rollback(); } catch { /* Preserve the write failure. */ }
+      throw error;
+    } finally {
+      connection.release();
+    }
   }
 }
 
