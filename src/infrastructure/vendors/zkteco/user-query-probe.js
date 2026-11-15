@@ -22,6 +22,7 @@ export function createUserQueryProbe(setting, allowedDevices, directorySetting) 
   const withinWindow = device => target(device) && sentAt !== null && Date.now() - sentAt <= responseWindowMs;
   return Object.freeze({
     isDirectoryTarget(device) { return directory && target(device); },
+    isDirectoryAwaitingUploads(device) { return directory && target(device) && (sentAt === null || withinWindow(device)); },
     takeCommand(device) {
       if (!target(device) || sentAt !== null) return null;
       sentAt = Date.now();

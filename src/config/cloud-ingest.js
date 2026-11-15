@@ -48,6 +48,7 @@ export function loadCloudIngestConfig(env = process.env) {
     token, basicCredentials, consumerApi, allowedDevices: Object.freeze(allowedDevices), userProfilePushDevices,
     userQueryProbe: env.BIOMETRIC_INGEST_USER_QUERY_PROBE,
     userDirectoryPreview: env.BIOMETRIC_INGEST_USER_DIRECTORY_PREVIEW,
+    biodataDiscardDevice: env.BIOMETRIC_INGEST_BIODATA_DISCARD_DEVICE,
     maxBodyBytes: integer(env.BIOMETRIC_INGEST_MAX_BODY_BYTES, 524288, 1024, 524288),
     autoFinalizeNewPunches: false,
     retrySweepSeconds: integer(env.BIOMETRIC_INGEST_RETRY_SWEEP_SECONDS, 2, 1, 3600),

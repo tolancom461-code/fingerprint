@@ -6,6 +6,7 @@ import {
 import { buildAttlogAck, buildHandshakeResponse } from './adms-response.js';
 import { observeDeviceOptionsBody, toZktecoDeviceMetadata } from './device-options.js';
 import { observeOperlogBody } from './operlog-observer.js';
+import { countDiscardedBiodata } from './biodata-discard.js';
 import { createZktecoAttlogObservations } from './attlog-observation.js';
 import { evaluateDeviceRequestPolicy } from '../../../domain/device-policy.js';
 import {
@@ -21,7 +22,8 @@ const PARSER_VERSION = 'zkteco-attlog-observer-v6';
 const USER_PROFILE_PUSH_PROTOCOL = '2.4.1';
 
 export class ZktecoAdmsAdapter {
-  constructor({ config, deviceRegistry, receivePunchBatch, diagnosticLog, deviceStore = null, userProfilePushDevices = [], userQueryProbe = null }) {
+  constructor({ config, deviceRegistry, receivePunchBatch, diagnosticLog, deviceStore = null,
+    userProfilePushDevices = [], userQueryProbe = null, acknowledgeBiodataDiscard = false }) {
     this.vendor = VENDOR;
     this.config = config;
     this.deviceRegistry = deviceRegistry;
@@ -30,6 +32,7 @@ export class ZktecoAdmsAdapter {
     this.deviceStore = deviceStore;
     this.userProfilePushDevices = new Set(userProfilePushDevices);
     this.userQueryProbe = userQueryProbe;
+    this.acknowledgeBiodataDiscard = acknowledgeBiodataDiscard;
   }
 
   matches(req) {
@@ -180,6 +183,14 @@ export class ZktecoAdmsAdapter {
         return text(res, 503, result.safeToAcknowledge ? 'OBSERVED_NOT_ACKNOWLEDGED' : 'UNSAFE_ATTLOG_NOT_ACKNOWLEDGED');
       }
 
+      if (request.table === 'BIODATA' && this.acknowledgeBiodataDiscard &&
+          this.userQueryProbe?.isDirectoryAwaitingUploads(device) && isUnambiguousUpload(req.url)) {
+        const { bytes, recordCount } = await countDiscardedBiodata(req, this.config.maxBodyBytes);
+        const type = recordCount === 0 ? 'biodata_discard_rejected' : 'biodata_discard_acknowledged';
+        await this.diagnosticLog.write({ type, table: 'BIODATA', bytes, recordCount });
+        return recordCount === 0 ? text(res, 503, 'DISCARDED_NOT_ACKNOWLEDGED') : text(res, 200, `OK:${recordCount}`);
+      }
+
       const bytes = await discardBody(req, this.config.maxBodyBytes);
       await this.diagnosticLog.write({
         type: looksLikeBiometricTemplateTable(request.table)
@@ -230,6 +241,10 @@ export class ZktecoAdmsAdapter {
   }
 }
 
+function isUnambiguousUpload(rawUrl) {
+  const keys = Array.from(new URL(rawUrl, 'http://biometric.local').searchParams.keys(), key => key.toLowerCase());
+  return keys.filter(key => key === 'sn').length === 1 && keys.filter(key => key === 'table').length === 1;
+}
 
 function toSqlDateTime(value) {
   return new Date(value).toISOString().replace('T', ' ').replace('Z', '');

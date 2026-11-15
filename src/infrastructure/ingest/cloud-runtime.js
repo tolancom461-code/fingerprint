@@ -34,6 +34,7 @@ const LOG_TYPES = new Set([
   'device_request', 'device_options_observed', 'device_operlog_observed', 'devicecmd_result_observed',
   'user_query_probe_sent', 'user_query_probe_reply', 'user_query_probe_profile_observed', 'user_directory_preview_profiles',
   'biometric_payload_discarded', 'unsupported_cdata_discarded', 'punch_batch', 'canonical_punch_processing_failed',
+  'biodata_discard_acknowledged', 'biodata_discard_rejected',
   'canonical_punch_replay_failed', 'durable_ingest_replay_completed', 'durable_ingest_retry_sweep_completed',
   'durable_ingest_retry_sweep_failed', 'automatic_finalization_failed', 'automatic_finalization_succeeded',
   'automatic_finalization_unresolved', 'automatic_finalization_retry_failed',
@@ -55,6 +56,10 @@ export async function startCloudIngest({ config, openDatabase = createIngestData
   try {
     const { basicCredentials, consumerApi, userProfilePushDevices } = validateRuntimeConfig(config);
     const userQueryProbe = createUserQueryProbe(config.userQueryProbe, config.allowedDevices, config.userDirectoryPreview);
+    const acknowledgeBiodataDiscard = config.biodataDiscardDevice != null && config.biodataDiscardDevice !== '';
+    if (acknowledgeBiodataDiscard && (!userQueryProbe?.directorySnapshot || config.biodataDiscardDevice !== config.userDirectoryPreview)) {
+      throw new Error('BIODATA discard requires the same device as the directory preview');
+    }
     database = await openDatabase(config.database);
     const databaseReady = await database.checkReady();
     const deviceUserIdentityEnabled = databaseReady?.deviceUserIdentityEnabled === true;
@@ -74,7 +79,7 @@ export async function startCloudIngest({ config, openDatabase = createIngestData
     }) : basePunchStore;
     const receivePunchBatch = new ReceivePunchBatch({ deviceRegistry, ingestStore, punchStore, diagnosticLog: log });
     const adapter = new ZktecoAdmsAdapter({ config: { adms: config.adms, maxBodyBytes: config.maxBodyBytes, attlogAckMode: 'ack' },
-      deviceRegistry, receivePunchBatch, diagnosticLog: log, deviceStore, userProfilePushDevices, userQueryProbe });
+      deviceRegistry, receivePunchBatch, diagnosticLog: log, deviceStore, userProfilePushDevices, userQueryProbe, acknowledgeBiodataDiscard });
     const registry = createAuthenticatedRegistry({ registry: new VendorAdapterRegistry([adapter]), token: config.token,
       basicCredentials, diagnosticLog: log,
       rejectedRequestObserver: req => connectionDiagnostics.recordRejectedRequest(req) });
@@ -139,7 +144,8 @@ export async function startCloudIngest({ config, openDatabase = createIngestData
 function sanitizedLog(sink) {
   return Object.freeze({ async write(entry) {
     const clean = { type: LOG_TYPES.has(entry?.type) ? entry.type : 'diagnostic', occurredAt: new Date().toISOString() };
-    if (clean.type === 'biometric_payload_discarded' && looksLikeBiometricTemplateTable(entry.table)) {
+    if ((clean.type === 'biometric_payload_discarded' || clean.type === 'biodata_discard_acknowledged' ||
+         clean.type === 'biodata_discard_rejected') && looksLikeBiometricTemplateTable(entry.table)) {
       clean.table = entry.table.trim().toUpperCase();
       if (Number.isSafeInteger(entry.bytes) && entry.bytes >= 0) clean.bytes = entry.bytes;
     }

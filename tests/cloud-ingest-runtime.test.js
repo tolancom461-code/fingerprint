@@ -62,7 +62,7 @@ function configuration(port) {
     adms: { delaySeconds: 10, errorDelaySeconds: 60, realtime: 1, encrypt: 0 } };
 }
 async function start(t, { includeViewer = false, retrySweepSeconds = 1, basicCredentials, consumerApi,
-  allowedDevices, userProfilePushDevices, userQueryProbe, userDirectoryPreview } = {}) {
+  allowedDevices, userProfilePushDevices, userQueryProbe, userDirectoryPreview, biodataDiscardDevice } = {}) {
   const fixture = fakeDatabase();
   const logs = [];
   const config = configuration(await freePort());
@@ -73,6 +73,7 @@ async function start(t, { includeViewer = false, retrySweepSeconds = 1, basicCre
   if (userProfilePushDevices !== undefined) config.userProfilePushDevices = userProfilePushDevices;
   if (userQueryProbe !== undefined) config.userQueryProbe = userQueryProbe;
   if (userDirectoryPreview !== undefined) config.userDirectoryPreview = userDirectoryPreview;
+  if (biodataDiscardDevice !== undefined) config.biodataDiscardDevice = biodataDiscardDevice;
   if (includeViewer) config.portal.users.push({ username: 'test-viewer', passwordHash, role: 'viewer' });
   const runtime = await startCloudIngest({ config, openDatabase: async settings => {
     assert.equal(settings, config.database); return fixture.database;
@@ -207,6 +208,38 @@ test('discarded biometric uploads log only the known table and byte count', asyn
   assert.deepEqual(biometric, { type: 'biometric_payload_discarded', table: 'BIODATA', bytes: Buffer.byteLength(body) });
   assert.doesNotMatch(JSON.stringify(lab.logs), /synthetic-biometric-payload|private-unknown-tag|TEST-DEVICE/);
   assert.ok(writes(lab.state).every(call => call.sql.includes('biometric_svc_devices')));
+});
+
+test('opt-in acknowledges complete BIODATA envelopes only for the directory preview target', async t => {
+  const lab = await start(t, { allowedDevices: ['zkteco:TEST-DEVICE', 'zkteco:OTHER-DEVICE'],
+    userDirectoryPreview: 'zkteco:TEST-DEVICE', biodataDiscardDevice: 'zkteco:TEST-DEVICE' });
+  const query = 'SN=TEST-DEVICE&table=BIODATA';
+  const record = 'BIODATA Pin=17\tNo=0\tIndex=2\tValid=1\tDuress=0\tType=8\tMajorVer=1\tMinorVer=0\tFormat=0\tTmp=U1lOVEhFVElD';
+  const post = (params, body, authenticated = true) => fetch(`${lab.base}/iclock/cdata?${params}`, { method: 'POST',
+    headers: authenticated ? { Authorization: `Bearer ${token}` } : {}, body });
+  assert.equal((await post(query, record, false)).status, 401);
+  assert.equal((await post('SN=OTHER-DEVICE&table=BIODATA', record)).status, 503);
+  assert.equal((await post('SN=TEST-DEVICE&table=BIOPHOTO', record)).status, 503);
+  assert.equal((await post(`${query}&TABLE=ATTLOG`, record)).status, 503);
+  assert.equal((await post(`${query}&sn=OTHER-DEVICE`, record)).status, 503);
+  assert.equal((await post(query, `${record}\n17\t2026-11-15 12:00:00\t0\t1`)).status, 503);
+  assert.equal((await post(query, 'BIODATA Pin=17\tNo=0\tTmp=')).status, 503);
+  const twoRecords = `${record}\r\n\r\n${record.replace('Pin=17', 'Pin=18')}`;
+  const accepted = await post(query, twoRecords);
+  assert.equal(accepted.status, 200);
+  assert.equal(await accepted.text(), 'OK:2');
+  assert.equal(lab.logs.filter(entry => entry.type === 'biodata_discard_acknowledged').length, 1);
+  const { occurredAt, ...entry } = lab.logs.find(item => item.type === 'biodata_discard_acknowledged');
+  assert.deepEqual(entry, { type: 'biodata_discard_acknowledged', table: 'BIODATA', bytes: Buffer.byteLength(twoRecords), recordCount: 2 });
+  assert.doesNotMatch(JSON.stringify(lab.logs), /Pin=17|U1lOVEhFVElD|TEST-DEVICE/);
+  assert.ok(writes(lab.state).every(call => call.sql.includes('biometric_svc_devices')));
+});
+
+test('BIODATA discard rejects a device outside the configured directory preview at startup', async () => {
+  const config = { ...configuration(0), biodataDiscardDevice: 'zkteco:TEST-DEVICE' };
+  let opened = false;
+  await assert.rejects(startCloudIngest({ config, openDatabase: async () => { opened = true; } }), { code: 'CLOUD_INGEST_START_FAILED' });
+  assert.equal(opened, false);
 });
 async function login(lab, username = 'test-admin') {
   const response = await fetch(lab.base + '/auth/login', { method: 'POST',
