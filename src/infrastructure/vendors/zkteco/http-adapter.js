@@ -21,7 +21,7 @@ const PARSER_VERSION = 'zkteco-attlog-observer-v6';
 const USER_PROFILE_PUSH_PROTOCOL = '2.4.1';
 
 export class ZktecoAdmsAdapter {
-  constructor({ config, deviceRegistry, receivePunchBatch, diagnosticLog, deviceStore = null, userProfilePushDevices = [] }) {
+  constructor({ config, deviceRegistry, receivePunchBatch, diagnosticLog, deviceStore = null, userProfilePushDevices = [], userQueryProbe = null }) {
     this.vendor = VENDOR;
     this.config = config;
     this.deviceRegistry = deviceRegistry;
@@ -29,6 +29,7 @@ export class ZktecoAdmsAdapter {
     this.diagnosticLog = diagnosticLog;
     this.deviceStore = deviceStore;
     this.userProfilePushDevices = new Set(userProfilePushDevices);
+    this.userQueryProbe = userQueryProbe;
   }
 
   matches(req) {
@@ -132,10 +133,12 @@ export class ZktecoAdmsAdapter {
       if (request.table === 'OPERLOG') {
         const body = await readBody(req, this.config.maxBodyBytes);
         const observation = observeOperlogBody(body);
+        const probeProfile = this.userQueryProbe?.observeProfile(device, body, observation);
+        if (probeProfile) await this.diagnosticLog.write(probeProfile);
         if (this.deviceStore && observation.safeToAcknowledge) {
           await this.deviceStore.upsertSafeUsers({
             device,
-            records: observation.records,
+            records: this.userQueryProbe?.profilesForStorage(device, observation.records) ?? observation.records,
             observedAt: toSqlDateTime(new Date().toISOString())
           });
         }
@@ -195,10 +198,21 @@ export class ZktecoAdmsAdapter {
     }
 
     if (req.method === 'GET' && request.pathname === '/iclock/getrequest') {
+      const command = this.userQueryProbe?.takeCommand(device);
+      if (command) {
+        await this.diagnosticLog.write({ type: 'user_query_probe_sent' });
+        return text(res, 200, command);
+      }
       return text(res, 200, 'OK');
     }
 
     if (req.method === 'POST' && request.pathname === '/iclock/devicecmd') {
+      if (this.userQueryProbe?.awaitsReply(device)) {
+        const body = await readBody(req, Math.min(this.config.maxBodyBytes, 4096));
+        const reply = this.userQueryProbe.observeReply(device, body);
+        if (reply) await this.diagnosticLog.write(reply);
+        return text(res, 200, 'OK');
+      }
       const bytes = await discardBody(req, this.config.maxBodyBytes);
       await this.diagnosticLog.write({
         type: 'devicecmd_result_observed',

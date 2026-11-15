@@ -46,6 +46,7 @@ export function loadCloudIngestConfig(env = process.env) {
   } catch { throw invalid(); }
   return Object.freeze({ host, port: integer(env.PORT, 8080, 1, 65535), portal,
     token, basicCredentials, consumerApi, allowedDevices: Object.freeze(allowedDevices), userProfilePushDevices,
+    userQueryProbe: env.BIOMETRIC_INGEST_USER_QUERY_PROBE,
     maxBodyBytes: integer(env.BIOMETRIC_INGEST_MAX_BODY_BYTES, 524288, 1024, 524288),
     autoFinalizeNewPunches: false,
     retrySweepSeconds: integer(env.BIOMETRIC_INGEST_RETRY_SWEEP_SECONDS, 2, 1, 3600),

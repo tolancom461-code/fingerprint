@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import net from 'node:net';
+import { createHash } from 'node:crypto';
 import { startCloudIngest } from '../src/infrastructure/ingest/cloud-runtime.js';
 import { hashPassword } from '../src/infrastructure/portal/auth.js';
 
@@ -61,7 +62,7 @@ function configuration(port) {
     adms: { delaySeconds: 10, errorDelaySeconds: 60, realtime: 1, encrypt: 0 } };
 }
 async function start(t, { includeViewer = false, retrySweepSeconds = 1, basicCredentials, consumerApi,
-  allowedDevices, userProfilePushDevices } = {}) {
+  allowedDevices, userProfilePushDevices, userQueryProbe } = {}) {
   const fixture = fakeDatabase();
   const logs = [];
   const config = configuration(await freePort());
@@ -70,6 +71,7 @@ async function start(t, { includeViewer = false, retrySweepSeconds = 1, basicCre
   if (consumerApi !== undefined) config.consumerApi = consumerApi;
   if (allowedDevices !== undefined) config.allowedDevices = allowedDevices;
   if (userProfilePushDevices !== undefined) config.userProfilePushDevices = userProfilePushDevices;
+  if (userQueryProbe !== undefined) config.userQueryProbe = userQueryProbe;
   if (includeViewer) config.portal.users.push({ username: 'test-viewer', passwordHash, role: 'viewer' });
   const runtime = await startCloudIngest({ config, openDatabase: async settings => {
     assert.equal(settings, config.database); return fixture.database;
@@ -113,6 +115,38 @@ test('runtime rejects profile-push devices outside its allowlist before opening 
   await assert.rejects(startCloudIngest({ config, openDatabase: async () => { opened = true; },
     diagnosticLog: { async write() {} } }), { code: 'CLOUD_INGEST_START_FAILED' });
   assert.equal(opened, false);
+});
+
+test('one authorized read of an existing name reports matching evidence without persisting the queried profile', async t => {
+  const expectedName = 'Synthetic Existing Name';
+  const hash = createHash('sha256').update(expectedName).digest('hex');
+  const lab = await start(t, { allowedDevices: ['zkteco:TEST-DEVICE', 'zkteco:OTHER-DEVICE'],
+    userQueryProbe: `zkteco:TEST-DEVICE,1,${hash}` });
+  const auth = { Authorization: `Bearer ${token}` };
+  const poll = '/iclock/getrequest?SN=TEST-DEVICE';
+  assert.equal((await fetch(lab.base + poll)).status, 401);
+  assert.equal(await (await fetch(lab.base + '/iclock/getrequest?SN=OTHER-DEVICE', { headers: auth })).text(), 'OK');
+  const command = await (await fetch(lab.base + poll, { headers: auth })).text();
+  const id = /^C:(\d+):DATA QUERY USERINFO PIN=1\n$/.exec(command)?.[1];
+  assert.ok(id);
+  assert.equal(await (await fetch(lab.base + poll, { headers: auth })).text(), 'OK');
+  const post = (route, body) => fetch(lab.base + route, {method: 'POST', headers: auth, body});
+  const operlog = '/iclock/cdata?SN=TEST-DEVICE&table=OPERLOG';
+  assert.equal((await post(operlog, `USER PIN=1\tName=Different\tName=${expectedName}`)).status, 200);
+  assert.equal(lab.logs.some(entry => entry.type === 'user_query_probe_profile_observed'), false);
+  assert.equal((await post(operlog, `USER PIN=1\tName=${expectedName}\tPasswd=synthetic-secret`)).status, 200);
+  const reply = '/iclock/devicecmd?SN=TEST-DEVICE';
+  assert.equal((await post(reply, `ID=${id}&ID=1&Return=0&CMD=DATA`)).status, 200);
+  assert.equal(lab.logs.some(entry => entry.type === 'user_query_probe_reply'), false);
+  assert.equal((await post(reply, `ID=${id}&Return=0&CMD=DATA`)).status, 200);
+  const events = lab.logs.filter(entry => entry.type.startsWith('user_query_probe_'));
+  assert.deepEqual(events.map(({occurredAt, ...event}) => event), [
+    { type: 'user_query_probe_sent' },
+    { type: 'user_query_probe_profile_observed', probeProfileCount: 1, probeNamePresent: 1, probeNameMatches: 1 },
+    { type: 'user_query_probe_reply', probeAccepted: 1 }
+  ]);
+  assert.doesNotMatch(JSON.stringify(lab.logs), /Synthetic Existing Name|synthetic-secret/);
+  assert.equal(writes(lab.state).some(call => call.sql.includes('biometric_svc_device_users')), false);
 });
 async function login(lab, username = 'test-admin') {
   const response = await fetch(lab.base + '/auth/login', { method: 'POST',

@@ -17,6 +17,7 @@ import { startDurableIngestRetryLoop } from '../../application/start-durable-ing
 import { startAutomaticFinalizationRetryLoop } from '../../application/start-automatic-finalization-retry-loop.js';
 import { VendorAdapterRegistry } from '../vendors/vendor-adapter-registry.js';
 import { ZktecoAdmsAdapter } from '../vendors/zkteco/http-adapter.js';
+import { createUserQueryProbe } from '../vendors/zkteco/user-query-probe.js';
 import { createHttpServer } from '../http/server.js';
 import { createCloudIngestPortalHandler } from '../portal/server.js';
 import { createAuthenticatedRegistry } from './authenticated-registry.js';
@@ -30,6 +31,7 @@ const defaultLog = Object.freeze({ async write(entry) { process.stdout.write(JSO
 const LOG_TYPES = new Set([
   'cloud_ingest_started', 'cloud_ingest_stopped', 'machine_auth_rejected', 'device_rejected', 'device_policy_rejected',
   'device_request', 'device_options_observed', 'device_operlog_observed', 'devicecmd_result_observed',
+  'user_query_probe_sent', 'user_query_probe_reply', 'user_query_probe_profile_observed',
   'biometric_payload_discarded', 'unsupported_cdata_discarded', 'punch_batch', 'canonical_punch_processing_failed',
   'canonical_punch_replay_failed', 'durable_ingest_replay_completed', 'durable_ingest_retry_sweep_completed',
   'durable_ingest_retry_sweep_failed', 'automatic_finalization_failed', 'automatic_finalization_succeeded',
@@ -39,7 +41,8 @@ const LOG_TYPES = new Set([
 ]);
 const LOG_COUNTS = ['lineCount', 'validCount', 'invalidCount', 'unsafeCount', 'acceptedCount', 'duplicateCount',
   'canonicalInsertedCount', 'canonicalDuplicateCount', 'canonicalPendingCount', 'canonicalNotApplicableCount',
-  'recordCount', 'eligibleCount', 'insertedCount', 'failedCount', 'finalCount', 'unresolvedCount'];
+  'recordCount', 'eligibleCount', 'insertedCount', 'failedCount', 'finalCount', 'unresolvedCount',
+  'probeAccepted', 'probeProfileCount', 'probeNamePresent', 'probeNameMatches'];
 
 // The optional consumer API uses its own bearer credential and SELECT stores.
 export async function startCloudIngest({ config, openDatabase = createIngestDatabase, diagnosticLog = defaultLog } = {}) {
@@ -50,6 +53,7 @@ export async function startCloudIngest({ config, openDatabase = createIngestData
   const log = sanitizedLog(diagnosticLog);
   try {
     const { basicCredentials, consumerApi, userProfilePushDevices } = validateRuntimeConfig(config);
+    const userQueryProbe = createUserQueryProbe(config.userQueryProbe, config.allowedDevices);
     database = await openDatabase(config.database);
     const databaseReady = await database.checkReady();
     const deviceUserIdentityEnabled = databaseReady?.deviceUserIdentityEnabled === true;
@@ -69,7 +73,7 @@ export async function startCloudIngest({ config, openDatabase = createIngestData
     }) : basePunchStore;
     const receivePunchBatch = new ReceivePunchBatch({ deviceRegistry, ingestStore, punchStore, diagnosticLog: log });
     const adapter = new ZktecoAdmsAdapter({ config: { adms: config.adms, maxBodyBytes: config.maxBodyBytes, attlogAckMode: 'ack' },
-      deviceRegistry, receivePunchBatch, diagnosticLog: log, deviceStore, userProfilePushDevices });
+      deviceRegistry, receivePunchBatch, diagnosticLog: log, deviceStore, userProfilePushDevices, userQueryProbe });
     const registry = createAuthenticatedRegistry({ registry: new VendorAdapterRegistry([adapter]), token: config.token,
       basicCredentials, diagnosticLog: log,
       rejectedRequestObserver: req => connectionDiagnostics.recordRejectedRequest(req) });
