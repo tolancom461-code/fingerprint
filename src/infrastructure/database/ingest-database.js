@@ -14,6 +14,15 @@ export const INGEST_TABLE_PRIVILEGES = Object.freeze(Object.fromEntries(Object.v
 const METADATA_TABLES = new Set(['COLUMNS', 'TABLES', 'STATISTICS']);
 const DEVICE_ROW_LOCK = 'SELECT id FROM `biometric_svc_devices` WHERE id = ? FOR UPDATE';
 const DEVICE_IDENTITIES_LOCK = /^SELECT id, status, identity_started_at, identity_ended_at\s+FROM `biometric_svc_device_users` WHERE device_id = \? AND device_user_id = \? ORDER BY id FOR UPDATE$/;
+const DIRECTORY_LOCKS = new Set([
+  'SELECT id, vendor, serial_number, status, mode FROM `biometric_svc_devices` WHERE id = ? FOR UPDATE',
+  'SELECT id, device_user_id, display_name, status, first_seen_at, last_seen_at, safe_metadata, identity_started_at, identity_ended_at FROM `biometric_svc_device_users` WHERE device_id = ? ORDER BY id FOR UPDATE'
+]);
+const DIRECTORY_AUDIT_INSERT = 'INSERT INTO `biometric_svc_audit_log` ( actor_type, actor_reference, action_type, entity_type, entity_id, before_state, after_state, notes, occurred_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(6))';
+const DIRECTORY_AUDIT_ENTITIES = new Map([
+  ['device_user_added', 'device_user'], ['device_user_updated', 'device_user'], ['device_user_archived', 'device_user'],
+  ['device_user_directory_checkpoint', 'device']
+]);
 const ACCOUNT_PART = "(?:'(?:[^'\\\\]|\\\\.|'')*'|`(?:[^`]|``)*`)";
 const ACCOUNT = `${ACCOUNT_PART}\\s*@\\s*${ACCOUNT_PART}`;
 const USAGE_GRANT = new RegExp(`^GRANT\\s+USAGE\\s+ON\\s+\\*\\.\\*\\s+TO\\s+${ACCOUNT}$`, 'i');
@@ -104,21 +113,29 @@ export async function createIngestDatabase(config, { createPool = mysql.createPo
         try {
           const deviceLock = sql === DEVICE_ROW_LOCK;
           const identityLock = typeof sql === 'string' && DEVICE_IDENTITIES_LOCK.test(sql);
-          if (deviceLock || identityLock) {
+          const normalized = typeof sql === 'string' ? sql.trim().replace(/\s+/g, ' ') : '';
+          const directoryLock = settings.directorySyncEnabled && DIRECTORY_LOCKS.has(normalized);
+          const directoryAudit = settings.directorySyncEnabled && normalized === DIRECTORY_AUDIT_INSERT;
+          if (deviceLock || identityLock || directoryLock) {
             const deviceId = params?.[0];
-            if (!transaction || !Array.isArray(params) || params.length !== (deviceLock ? 1 : 2) ||
-                (typeof deviceId !== 'string' && !Number.isSafeInteger(deviceId)) || !/^[1-9]\d{0,19}$/.test(String(deviceId)) ||
+            if (!transaction || !Array.isArray(params) || params.length !== (identityLock ? 2 : 1) || !positiveId(deviceId) ||
                 (identityLock && (typeof params[1] !== 'string' || !params[1].length || params[1].length > 128 || params[1].includes('\0')))) {
               throw safe('INGEST_DATABASE_QUERY_REJECTED');
             }
+          } else if (directoryAudit) {
+            if (!transaction || !validDirectoryAuditParams(params)) throw safe('INGEST_DATABASE_QUERY_REJECTED');
           } else assertStatement(sql, params);
         } catch (error) { return Promise.reject(error); }
         return controller.executeTrusted(sql, params);
       },
-      async beginTransaction() {
+      async beginTransaction(options) {
         if (released || closed) throw safe(closed ? 'INGEST_DATABASE_CLOSED' : releaseCode);
         if (transaction || busy) throw safe('INGEST_DATABASE_TRANSACTION_STATE_INVALID');
+        if (options !== undefined && (!settings.directorySyncEnabled || options?.readCommitted !== true || Object.keys(options).length !== 1)) {
+          throw safe('INGEST_DATABASE_QUERY_REJECTED');
+        }
         transaction = true;
+        if (options) await run(() => raw.query({ sql: 'SET TRANSACTION ISOLATION LEVEL READ COMMITTED', timeout: settings.queryTimeoutMs }));
         await run(() => raw.beginTransaction());
       },
       async commit() {
@@ -175,10 +192,11 @@ export async function createIngestDatabase(config, { createPool = mysql.createPo
         throw safe('INGEST_DATABASE_GRANTS_REJECTED');
       }
       const [grants] = await execute('SHOW GRANTS FOR CURRENT_USER()', [], true);
-      assertGrants(grants);
+      assertGrants(grants, settings.directorySyncEnabled);
       let schema;
       try { schema = await assertBiometricDatabaseReady({ execute }, 'fingerprint'); }
       catch (error) { if (known(error)) throw error; throw safe('INGEST_DATABASE_SCHEMA_REJECTED'); }
+      if (settings.directorySyncEnabled && !schema.deviceUserIdentityEnabled) throw safe('INGEST_DATABASE_SCHEMA_REJECTED');
       if (schema.deviceUserIdentityEnabled) {
         const [[server]] = await execute('SELECT VERSION() AS server_version');
         if (typeof server?.server_version !== 'string') throw safe('INGEST_DATABASE_SCHEMA_REJECTED');
@@ -227,7 +245,7 @@ export async function createIngestDatabase(config, { createPool = mysql.createPo
   });
 }
 
-function assertGrants(rows) {
+function assertGrants(rows, directorySyncEnabled) {
   if (!Array.isArray(rows) || !rows.length || rows.length > 100) throw safe('INGEST_DATABASE_GRANTS_REJECTED');
   const seen = new Map();
   for (const row of rows) {
@@ -241,16 +259,35 @@ function assertGrants(rows) {
     if (!match || database !== 'fingerprint' || !Object.hasOwn(INGEST_TABLE_PRIVILEGES, table)) throw safe('INGEST_DATABASE_GRANTS_REJECTED');
     const allowed = INGEST_TABLE_PRIVILEGES[table];
     for (const privilege of match[1].split(',').map(item => item.trim().toUpperCase())) {
-      if (!allowed.includes(privilege)) throw safe('INGEST_DATABASE_GRANTS_REJECTED');
+      if (!allowed.includes(privilege) && !(table === BIOMETRIC_TABLES.auditLog && privilege === 'INSERT')) {
+        throw safe('INGEST_DATABASE_GRANTS_REJECTED');
+      }
       if (!seen.has(table)) seen.set(table, new Set());
       seen.get(table).add(privilege);
     }
   }
   for (const [table, required] of Object.entries(INGEST_TABLE_PRIVILEGES)) {
-    if (seen.get(table)?.size !== required.length || required.some(privilege => !seen.get(table).has(privilege))) {
+    const allowed = seen.get(table);
+    if (required.some(privilege => !allowed?.has(privilege)) ||
+        (table === BIOMETRIC_TABLES.auditLog && directorySyncEnabled && !allowed?.has('INSERT'))) {
       throw safe('INGEST_DATABASE_GRANTS_REJECTED');
     }
   }
+}
+
+function validDirectoryAuditParams(params) {
+  if (!Array.isArray(params) || params.length !== 8) return false;
+  const [actor, reference, action, entity, id, before, after, notes] = params;
+  return actor === 'system' && reference === 'verified-device-directory' && DIRECTORY_AUDIT_ENTITIES.get(action) === entity &&
+    typeof entity === 'string' && positiveId(id) && (before === null || boundedAuditJson(before)) && boundedAuditJson(after) && notes === null;
+}
+
+function boundedAuditJson(value) {
+  return typeof value === 'string' && Buffer.byteLength(value) <= 2 * 1024 * 1024;
+}
+
+function positiveId(id) {
+  return (typeof id === 'string' || Number.isSafeInteger(id)) && /^[1-9]\d{0,19}$/.test(String(id));
 }
 
 function assertStatement(sql, params) {
@@ -360,11 +397,13 @@ function settingsFor(config) {
       typeof config.host !== 'string' || !config.host.trim() || config.host !== config.host.trim() ||
       typeof config.user !== 'string' || !config.user.trim() || config.user !== config.user.trim() ||
       /(?:^|\.)root$/i.test(config.user) || typeof config.password !== 'string' || !config.password ||
+      (config.directorySyncEnabled !== undefined && typeof config.directorySyncEnabled !== 'boolean') ||
       !['required', 'disabled'].includes(config.sslMode) ||
       (config.sslMode === 'disabled' && !['localhost', '127.0.0.1', '::1', '[::1]'].includes(config.host))) {
     throw safe('INGEST_DATABASE_CONFIG_INVALID');
   }
   return { host: config.host, user: config.user, password: config.password, sslMode: config.sslMode,
+    directorySyncEnabled: config.directorySyncEnabled === true,
     port: integer(config.port, 4000, 65535), connectionLimit: integer(config.connectionLimit, 5, 5),
     connectTimeoutMs: integer(config.connectTimeoutMs, 4000, 30000), queryTimeoutMs: integer(config.queryTimeoutMs, 5000, 30000),
     transactionTimeoutMs: integer(config.transactionTimeoutMs, 30000, 60000) };

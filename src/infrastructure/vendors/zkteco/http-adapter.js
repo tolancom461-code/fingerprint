@@ -23,7 +23,7 @@ const USER_PROFILE_PUSH_PROTOCOL = '2.4.1';
 
 export class ZktecoAdmsAdapter {
   constructor({ config, deviceRegistry, receivePunchBatch, diagnosticLog, deviceStore = null,
-    userProfilePushDevices = [], userQueryProbe = null, acknowledgeBiodataDiscard = false }) {
+    userProfilePushDevices = [], userQueryProbe = null, userDirectorySync = null, acknowledgeBiodataDiscard = false }) {
     this.vendor = VENDOR;
     this.config = config;
     this.deviceRegistry = deviceRegistry;
@@ -32,6 +32,7 @@ export class ZktecoAdmsAdapter {
     this.deviceStore = deviceStore;
     this.userProfilePushDevices = new Set(userProfilePushDevices);
     this.userQueryProbe = userQueryProbe;
+    this.userDirectorySync = userDirectorySync;
     this.acknowledgeBiodataDiscard = acknowledgeBiodataDiscard;
   }
 
@@ -139,7 +140,8 @@ export class ZktecoAdmsAdapter {
         const observation = observeOperlogBody(body);
         const probeProfile = this.userQueryProbe?.observeProfile(device, body, observation);
         if (probeProfile) await this.diagnosticLog.write(probeProfile);
-        if (this.deviceStore && observation.safeToAcknowledge) {
+        if (this.userDirectorySync && isUnambiguousUpload(req.url)) this.userDirectorySync.observeProfile(device, body, observation);
+        if (this.deviceStore && observation.safeToAcknowledge && !this.userDirectorySync?.ownsProfiles(device)) {
           await this.deviceStore.upsertSafeUsers({
             device,
             records: this.userQueryProbe?.profilesForStorage(device, observation.records) ?? observation.records,
@@ -210,6 +212,10 @@ export class ZktecoAdmsAdapter {
     }
 
     if (req.method === 'GET' && request.pathname === '/iclock/getrequest') {
+      if (this.userDirectorySync && queryKeyCount(req.url, 'sn') === 1) {
+        const command = await this.userDirectorySync.takeCommand(device);
+        if (command) return text(res, 200, command);
+      }
       const command = this.userQueryProbe?.takeCommand(device);
       if (command) {
         await this.diagnosticLog.write({ type: 'user_query_probe_sent' });
@@ -219,6 +225,11 @@ export class ZktecoAdmsAdapter {
     }
 
     if (req.method === 'POST' && request.pathname === '/iclock/devicecmd') {
+      if (this.userDirectorySync?.awaitsReply(device) && queryKeyCount(req.url, 'sn') === 1) {
+        const body = await readBody(req, Math.min(this.config.maxBodyBytes, 64 * 1024));
+        await this.userDirectorySync.observeReply(device, body);
+        return text(res, 200, 'OK');
+      }
       if (this.userQueryProbe?.awaitsReply(device)) {
         const body = await readBody(req, Math.min(this.config.maxBodyBytes, 4096));
         const reply = this.userQueryProbe.observeReply(device, body);
@@ -242,8 +253,11 @@ export class ZktecoAdmsAdapter {
 }
 
 function isUnambiguousUpload(rawUrl) {
-  const keys = Array.from(new URL(rawUrl, 'http://biometric.local').searchParams.keys(), key => key.toLowerCase());
-  return keys.filter(key => key === 'sn').length === 1 && keys.filter(key => key === 'table').length === 1;
+  return queryKeyCount(rawUrl, 'sn') === 1 && queryKeyCount(rawUrl, 'table') === 1;
+}
+
+function queryKeyCount(rawUrl, name) {
+  return [...new URL(rawUrl, 'http://biometric.local').searchParams.keys()].filter(key => key.toLowerCase() === name).length;
 }
 
 function toSqlDateTime(value) {

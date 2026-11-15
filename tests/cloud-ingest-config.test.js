@@ -16,6 +16,24 @@ function environment() {
 }
 const rejects = changes => assert.throws(() => loadCloudIngestConfig({ ...environment(), ...changes }), { code: 'CLOUD_INGEST_CONFIG_INVALID' });
 
+test('directory sync targets one allowed device and requests audit access only in active mode', () => {
+  const device = 'zkteco:FIXTURE-1';
+  const key = 'BIOMETRIC_INGEST_USER_DIRECTORY_SYNC_DEVICE';
+  const mode = 'BIOMETRIC_INGEST_USER_DIRECTORY_SYNC_MODE';
+  assert.equal(loadCloudIngestConfig(environment()).directorySyncMode, null);
+  const observe = loadCloudIngestConfig({ ...environment(), [key]: device });
+  assert.equal(observe.directorySyncDevice, device);
+  assert.equal(observe.directorySyncMode, 'observe');
+  assert.equal(observe.database.directorySyncEnabled, false);
+  assert.equal(loadCloudIngestConfig({ ...environment(), [key]: device, [mode]: 'active' }).database.directorySyncEnabled, true);
+  rejects({ [mode]: 'active' });
+  rejects({ [key]: 'zkteco:OTHER' });
+  rejects({ [key]: device, [mode]: 'enabled' });
+  for (const diagnostic of ['USER_QUERY_PROBE', 'USER_DIRECTORY_PREVIEW', 'BIODATA_DISCARD_DEVICE']) {
+    rejects({ [key]: device, ['BIOMETRIC_INGEST_' + diagnostic]: device });
+  }
+});
+
 test('cloud ingest explicitly selects fingerprint and a distinct writer with automatic finalization disabled', () => {
   const config = loadCloudIngestConfig(environment());
   assert.equal(config.database.database, 'fingerprint');

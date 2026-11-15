@@ -99,6 +99,26 @@ test('startup validates identity, exact grants, schema and eligibility before ex
   }
 });
 
+test('directory audit grant can be staged before activation and permits no unscoped audit SQL', async () => {
+  const absent = fixture();
+  await assert.rejects(() => createIngestDatabase({ ...config, directorySyncEnabled: true }, { createPool: absent.createPool }),
+    { code: 'INGEST_DATABASE_GRANTS_REJECTED' });
+  const auditGrant = { grant: "GRANT INSERT ON fingerprint.biometric_svc_audit_log TO 'writer'@'%'" };
+  const staged = fixture({ grants: [...grants(), auditGrant] });
+  const db = await createIngestDatabase(config, { createPool: staged.createPool });
+  const lease = await db.getConnection();
+  try {
+    await lease.beginTransaction();
+    const sql = 'INSERT INTO `biometric_svc_audit_log` ( actor_type, actor_reference, action_type, entity_type, entity_id, before_state, after_state, notes, occurred_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(6))';
+    await assert.rejects(() => lease.execute(sql, ['system', 'verified-device-directory', 'device_user_added', 'device_user', '1', null, '{}', null]),
+      { code: 'INGEST_DATABASE_QUERY_REJECTED' });
+    await lease.rollback();
+  } finally { lease.release(); await db.end(); }
+  const legacy = fixture({ grants: [...grants(), auditGrant] });
+  await assert.rejects(() => createIngestDatabase({ ...config, directorySyncEnabled: true }, { createPool: legacy.createPool }),
+    { code: 'INGEST_DATABASE_SCHEMA_REJECTED' });
+});
+
 test('writer pool pins TLS identity, finite limits and lossless dates, numeric IDs and JSON text', async () => {
   const f = fixture(); const db = await createIngestDatabase(config, { createPool: f.createPool });
   assert.deepEqual(f.state.poolOptions.ssl, { minVersion: 'TLSv1.2', rejectUnauthorized: true, verifyIdentity: true });

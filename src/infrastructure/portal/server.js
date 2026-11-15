@@ -27,17 +27,21 @@ export function createReadOnlyPortalHandler({ config, readStore }) {
 }
 
 export function createCloudIngestPortalHandler({ config, readStore, connectionDiagnostics = null, deviceDirectoryPreview = null }) {
+  const ingestCapabilities = {
+    ...(readStore?.deviceUserIdentityEnabled === true ? { deviceUserPunches: true } : {}),
+    ...(readStore?.directorySyncEnabled === true ? { deviceUserChanges: true } : {})
+  };
   return createPortalHandler({ config, service: createIngestPortalService({ readStore }), mode: 'database-ingest',
-    connectionDiagnostics, deviceDirectoryPreview });
+    connectionDiagnostics, deviceDirectoryPreview, ingestCapabilities });
 }
 
-function createPortalHandler({ config, service, mode, connectionDiagnostics = null, deviceDirectoryPreview = null }) {
+function createPortalHandler({ config, service, mode, connectionDiagnostics = null, deviceDirectoryPreview = null, ingestCapabilities = {} }) {
   const auth = createPortalAuth(config);
   const expectedHost = new URL(config.origin).host.toLowerCase();
   const secure = config.origin.startsWith('https:');
   const sessionPayload = session => ({ ...session, mode,
     capabilities: { createPerson: mode === 'demo' && session.user.role === 'admin',
-      ...(mode === 'database-ingest' ? { receivedRecords: true } : {}) } });
+      ...(mode === 'database-ingest' ? { receivedRecords: true, ...ingestCapabilities } : {}) } });
 
   return async function portalHandler(req, res) {
     const url = new URL(req.url || '/', config.origin);
@@ -104,9 +108,19 @@ function createPortalHandler({ config, service, mode, connectionDiagnostics = nu
             ['/api/portal/events', () => service.listEvents(filters)]
           ]);
           if (mode === 'database-ingest') {
-            reads.set('/api/portal/received-punches', () => service.listReceivedPunches(filters));
+            reads.set('/api/portal/received-punches', () => {
+              const deviceUserRowId = url.searchParams.get('deviceUserRowId') ?? undefined;
+              if (deviceUserRowId !== undefined && !ingestCapabilities.deviceUserPunches) {
+                throw coded('INVALID_INPUT', 'عرض الحركات حسب الهوية غير متاح في هذا المخطط', 400);
+              }
+              return service.listReceivedPunches({ ...filters, deviceUserRowId });
+            });
             reads.set('/api/portal/device-users', () => service.listDeviceUsers({ ...filters,
               roster: url.searchParams.get('roster') ?? undefined }));
+            if (ingestCapabilities.deviceUserChanges) {
+              reads.set('/api/portal/device-user-changes', () => service.listDeviceUserChanges({ ...filters,
+                kind: url.searchParams.get('kind') ?? undefined }));
+            }
           }
           if (reads.has(pathname)) {
             json(res, 200, await reads.get(pathname)());

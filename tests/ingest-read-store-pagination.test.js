@@ -32,3 +32,59 @@ test('unsafe pagination fails before sending any SQL to the database', async () 
   }
   assert.equal(calls, 0);
 });
+
+test('historical intake filters by the exact unsigned identity row, not a reused device number', async () => {
+  const calls = [];
+  const pool = { async execute(sql, params) {
+    calls.push({ sql, params });
+    return [sql.startsWith('SELECT COUNT') ? [{ total: '0' }] : []];
+  } };
+  const query = { page: 1, limit: 10, search: '', deviceUserRowId: '18446744073709551600' };
+  await assert.rejects(new TiDbIngestReadStore(pool).pageReceivedPunches(query), { code: 'INVALID_INPUT' });
+  const store = new TiDbIngestReadStore(pool, { deviceUserIdentityEnabled: true });
+  await assert.rejects(store.pageReceivedPunches({ ...query, deviceUserRowId: '18446744073709551616' }), { code: 'INVALID_INPUT' });
+  assert.equal(calls.length, 0);
+  await store.pageReceivedPunches(query);
+  assert.equal(calls.length, 2);
+  for (const call of calls) {
+    assert.match(call.sql, /WHERE p\.device_user_row_id = CAST\(\? AS UNSIGNED\)/);
+    assert.deepEqual(call.params, [query.deviceUserRowId]);
+    assert.doesNotMatch(call.sql, /p\.device_user_id\s*=/);
+  }
+});
+
+test('identity history reads original status, orders by device time, and recovers the six known device states', async () => {
+  const terminal = { serial_number: 'AJE1261900133', punch_vendor: 'zkteco', punch_state: null };
+  const states = ['check_in', 'check_out', 'break_out', 'break_in', 'overtime_in', 'overtime_out'];
+  const rows = states.map((_, index) => ({ ...terminal, device_punch_state: String(index) }));
+  rows.push({ ...terminal, device_punch_state: '9', punch_state: 'check_in' },
+    { ...terminal, serial_number: 'UNVERIFIED', device_punch_state: '0' });
+  const store = new TiDbIngestReadStore({ async execute(sql) {
+    if (sql.startsWith('SELECT COUNT')) return [[{ total: '8' }]];
+    assert.match(sql, /p\.raw_status AS device_punch_state, p\.punch_state/);
+    assert.match(sql, /ORDER BY p\.device_event_time_local DESC,p\.id DESC/);
+    return [rows];
+  } }, { deviceUserIdentityEnabled: true });
+  const result = await store.pageReceivedPunches({ page: 1, limit: 10, deviceUserRowId: '91' });
+  assert.deepEqual(result.items.map(row => row.punch_state), [...states, null, null]);
+  assert.deepEqual(result.items.map(row => row.device_punch_state), ['0', '1', '2', '3', '4', '5', '9', '0']);
+});
+
+test('directory history reads only whitelisted change snapshot fields and separates additions from edits', async () => {
+  const calls = [];
+  const store = new TiDbIngestReadStore({ async execute(sql, params) {
+    calls.push({ sql, params });
+    return [sql.startsWith('SELECT COUNT') ? [{ total: '0' }] : []];
+  } }, { directorySyncEnabled: true });
+  await store.pageDeviceUserChanges({ page: 2, limit: 10, search: '100%', kind: 'updated' });
+  assert.match(calls[0].sql, /a\.entity_type = 'device_user' AND a\.action_type = \?/);
+  assert.match(calls[0].sql, /ORDER BY a\.occurred_at DESC,a\.id DESC LIMIT 10 OFFSET 10$/);
+  assert.match(calls[0].sql, /AS before_display_name.*before_status/s);
+  assert.match(calls[0].sql, /\$\.metadata\.Pri.*AS before_pri/s);
+  assert.doesNotMatch(calls[0].sql, /(?:SELECT|,)\s+a\.(?:before|after)_state\b|\$\.metadata\.Passwd/);
+  assert.deepEqual(calls[0].params, ['device_user_updated', ...Array(4).fill('%100!%%')]);
+  await store.pageDeviceUserChanges({ page: 1, limit: 10, search: '', kind: 'added' });
+  assert.deepEqual(calls[2].params, ['device_user_added']);
+  await assert.rejects(store.pageDeviceUserChanges({ page: 1, limit: 10, search: '', kind: 'archived' }), { code: 'INVALID_INPUT' });
+  assert.equal(calls.length, 4);
+});

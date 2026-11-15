@@ -1,5 +1,6 @@
 import { createIngestDatabase } from '../database/ingest-database.js';
 import { TiDbDeviceStore } from '../storage/tidb-device-store.js';
+import { TiDbDeviceDirectorySyncStore } from '../storage/tidb-device-directory-sync-store.js';
 import { TiDbIngestStore } from '../storage/tidb-ingest-store.js';
 import { TiDbPunchStore } from '../storage/tidb-punch-store.js';
 import { TiDbFinalizationStore } from '../storage/tidb-finalization-store.js';
@@ -19,6 +20,7 @@ import { VendorAdapterRegistry } from '../vendors/vendor-adapter-registry.js';
 import { ZktecoAdmsAdapter } from '../vendors/zkteco/http-adapter.js';
 import { looksLikeBiometricTemplateTable } from '../vendors/zkteco/adms-parser.js';
 import { createUserQueryProbe } from '../vendors/zkteco/user-query-probe.js';
+import { createZktecoUserDirectorySync } from '../vendors/zkteco/user-directory-sync.js';
 import { createHttpServer } from '../http/server.js';
 import { createCloudIngestPortalHandler } from '../portal/server.js';
 import { createAuthenticatedRegistry } from './authenticated-registry.js';
@@ -33,6 +35,9 @@ const LOG_TYPES = new Set([
   'cloud_ingest_started', 'cloud_ingest_stopped', 'machine_auth_rejected', 'device_rejected', 'device_policy_rejected',
   'device_request', 'device_options_observed', 'device_operlog_observed', 'devicecmd_result_observed',
   'user_query_probe_sent', 'user_query_probe_reply', 'user_query_probe_profile_observed', 'user_directory_preview_profiles',
+  'user_directory_sync_count_requested', 'user_directory_sync_count_verified', 'user_directory_sync_timed_out',
+  'user_directory_sync_count_unavailable', 'user_directory_sync_roster_requested', 'user_directory_sync_incomplete',
+  'user_directory_sync_reconciled', 'user_directory_sync_store_failed',
   'biometric_payload_discarded', 'unsupported_cdata_discarded', 'punch_batch', 'canonical_punch_processing_failed',
   'biodata_discard_acknowledged', 'biodata_discard_rejected',
   'canonical_punch_replay_failed', 'durable_ingest_replay_completed', 'durable_ingest_retry_sweep_completed',
@@ -44,7 +49,8 @@ const LOG_TYPES = new Set([
 const LOG_COUNTS = ['lineCount', 'validCount', 'invalidCount', 'unsafeCount', 'acceptedCount', 'duplicateCount',
   'canonicalInsertedCount', 'canonicalDuplicateCount', 'canonicalPendingCount', 'canonicalNotApplicableCount',
   'recordCount', 'eligibleCount', 'insertedCount', 'failedCount', 'finalCount', 'unresolvedCount',
-  'probeAccepted', 'probeProfileCount', 'probeNamePresent', 'probeNameMatches'];
+  'probeAccepted', 'probeProfileCount', 'probeNamePresent', 'probeNameMatches', 'addedCount', 'updatedCount', 'archivedCount',
+  'pendingRemovalCount'];
 
 // The optional consumer API uses its own bearer credential and SELECT stores.
 export async function startCloudIngest({ config, openDatabase = createIngestDatabase, diagnosticLog = defaultLog } = {}) {
@@ -60,9 +66,14 @@ export async function startCloudIngest({ config, openDatabase = createIngestData
     if (acknowledgeBiodataDiscard && (!userQueryProbe?.directorySnapshot || config.biodataDiscardDevice !== config.userDirectoryPreview)) {
       throw new Error('BIODATA discard requires the same device as the directory preview');
     }
-    database = await openDatabase(config.database);
+    const directorySyncEnabled = config.directorySyncMode === 'active';
+    database = await openDatabase(directorySyncEnabled ? { ...config.database, directorySyncEnabled } : config.database);
     const databaseReady = await database.checkReady();
     const deviceUserIdentityEnabled = databaseReady?.deviceUserIdentityEnabled === true;
+    if (directorySyncEnabled && !deviceUserIdentityEnabled) throw new Error('Directory sync requires the identity schema');
+    const directoryStore = directorySyncEnabled ? new TiDbDeviceDirectorySyncStore(database) : null;
+    const userDirectorySync = config.directorySyncDevice ? createZktecoUserDirectorySync({ deviceKey: config.directorySyncDevice,
+      mode: config.directorySyncMode, write: entry => log.write(entry), onComplete: observation => directoryStore.reconcile(observation) }) : null;
     const deviceRegistry = new EnvDeviceRegistry(config.allowedDevices);
     const connectionDiagnostics = createDeviceConnectionDiagnostics({ allowedDevices: config.allowedDevices });
     const deviceStore = new TiDbDeviceStore(database, { deviceUserIdentityEnabled });
@@ -79,11 +90,13 @@ export async function startCloudIngest({ config, openDatabase = createIngestData
     }) : basePunchStore;
     const receivePunchBatch = new ReceivePunchBatch({ deviceRegistry, ingestStore, punchStore, diagnosticLog: log });
     const adapter = new ZktecoAdmsAdapter({ config: { adms: config.adms, maxBodyBytes: config.maxBodyBytes, attlogAckMode: 'ack' },
-      deviceRegistry, receivePunchBatch, diagnosticLog: log, deviceStore, userProfilePushDevices, userQueryProbe, acknowledgeBiodataDiscard });
+      deviceRegistry, receivePunchBatch, diagnosticLog: log, deviceStore, userProfilePushDevices, userQueryProbe, userDirectorySync,
+      acknowledgeBiodataDiscard });
     const registry = createAuthenticatedRegistry({ registry: new VendorAdapterRegistry([adapter]), token: config.token,
       basicCredentials, diagnosticLog: log,
       rejectedRequestObserver: req => connectionDiagnostics.recordRejectedRequest(req) });
-    const portal = createCloudIngestPortalHandler({ config: config.portal, readStore: new TiDbIngestReadStore(database),
+    const portal = createCloudIngestPortalHandler({ config: config.portal, readStore: new TiDbIngestReadStore(database,
+      { deviceUserIdentityEnabled, directorySyncEnabled }),
       connectionDiagnostics, deviceDirectoryPreview: userQueryProbe?.directorySnapshot });
     const consumerHandler = consumerApi ? createFinalEventsApiHandler({
       service: new FinalEventsReadService({ readStore: new TiDbFinalEventsReadStore(database) }),
@@ -179,6 +192,10 @@ function validateRuntimeConfig(config) {
       !Number.isInteger(config.replayLimit) || config.replayLimit < 1 || config.replayLimit > 10000 || !config.adms) {
     throw new Error('Invalid cloud ingest runtime configuration');
   }
+  if (Boolean(config.directorySyncDevice) !== Boolean(config.directorySyncMode) ||
+      (config.directorySyncDevice && (!config.allowedDevices.includes(config.directorySyncDevice) ||
+        !['observe', 'active'].includes(config.directorySyncMode) || config.userQueryProbe || config.userDirectoryPreview ||
+        config.biodataDiscardDevice))) throw new Error('Invalid device directory sync configuration');
   const basicCredentials = normalizeBasicMachineCredentials(config.basicCredentials);
   const consumerApi = normalizeConsumerApiConfig(config.consumerApi, {
     ingestToken: config.token,

@@ -14,7 +14,9 @@ const databaseDescriptions = {
   events: ['الحركات النهائية', 'الحركات النهائية المحفوظة، بتوقيت الرياض. لا تشمل الحركات المعلقة.'],
   'received-punches': ['الحركات المستلمة', 'السجلات المحفوظة عند الاستقبال، بما فيها المعلقة وغير المرتبطة بشخص.'],
   'device-users': ['مستخدمو الأجهزة الحاليون', 'المستخدمون الحاليون في دليل الجهاز، مع إبقاء ربطهم بالأشخاص مستقلًا.'],
-  'historical-device-users': ['المستخدمون التاريخيون', 'هويات محفوظة لحركاتها السابقة وروابطها بالأشخاص.']
+  'historical-device-users': ['المستخدمون التاريخيون', 'هويات محفوظة لحركاتها السابقة وروابطها بالأشخاص.'],
+  'new-device-users': ['المستخدمون الجدد', 'المستخدمون الذين سجّل النظام إضافتهم إلى دليل الجهاز.'],
+  'device-user-changes': ['التعديلات', 'القيم السابقة والجديدة للحقول التي تغيّرت في بيانات المستخدم.']
 };
 const deviceUserColumns = ['المستخدم', 'رقمه في الجهاز', 'الجهاز', 'القائمة', 'الشخص المرتبط', 'آخر ملاحظة'];
 const columns = {
@@ -23,13 +25,20 @@ const columns = {
   events: ['الشخص', 'نوع الحركة', 'التوقيت · الرياض', 'طريقة التحقق', 'الجهاز'],
   'received-punches': ['رقم المستخدم في الجهاز', 'وقت الحركة', 'الجهاز', 'المعالجة', 'حدث نهائي'],
   'device-users': deviceUserColumns,
-  'historical-device-users': deviceUserColumns
+  'historical-device-users': deviceUserColumns,
+  'new-device-users': ['المستخدم', 'رقمه في الجهاز', 'الجهاز', 'وقت الإضافة'],
+  'device-user-changes': ['رقم المستخدم في الجهاز', 'الجهاز', 'قبل التعديل', 'بعد التعديل', 'وقت التعديل']
 };
 const deviceRosters = { 'device-users': 'current', 'historical-device-users': 'historical' };
+const deviceChangeKinds = { 'new-device-users': 'added', 'device-user-changes': 'updated' };
+const devicePunchStates = new Map([
+  ['check_in', 'دخول'], ['check_out', 'خروج'], ['break_out', 'خروج للاستراحة'], ['break_in', 'عودة من الاستراحة'],
+  ['overtime_in', 'بداية العمل الإضافي'], ['overtime_out', 'نهاية العمل الإضافي']
+]);
 const numbers = new Intl.NumberFormat('ar-SA');
 const dates = new Intl.DateTimeFormat('ar-SA-u-ca-gregory', { timeZone: 'Asia/Riyadh', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 const state = {
-  session: null, view: 'overview', pending: false, request: 0, list: null,
+  session: null, view: 'overview', pending: false, request: 0, list: null, deviceUserRowId: null, userPunches: null,
   searches: Object.fromEntries(Object.keys(columns).map(view => [view, ''])),
   pages: Object.fromEntries(Object.keys(columns).map(view => [view, 1]))
 };
@@ -37,7 +46,10 @@ let searchTimer;
 
 function isDemo() { return (state.session?.mode ?? document.body.dataset.portalMode) === 'demo'; }
 function hasReceivedRecords() { return state.session?.capabilities?.receivedRecords === true; }
+function hasDeviceUserChanges() { return hasReceivedRecords() && state.session.capabilities.deviceUserChanges === true; }
+function hasDeviceUserPunches() { return hasReceivedRecords() && state.session.capabilities.deviceUserPunches === true; }
 function allowedView(view) {
+  if (Object.hasOwn(deviceChangeKinds, view)) return !isDemo() && hasDeviceUserChanges();
   if (view === 'received-punches' || Object.hasOwn(deviceRosters, view)) return !isDemo() && hasReceivedRecords();
   return Object.hasOwn(descriptions, view);
 }
@@ -45,8 +57,9 @@ function canCreatePerson() {
   return state.session?.capabilities?.createPerson === true && state.session?.user.role === 'admin' && state.session?.mode === 'demo';
 }
 function columnNames(view) {
-  return view === 'devices' && !isDemo()
-    ? ['الجهاز', 'الرقم التسلسلي', 'الطراز', 'الحالة الإدارية', 'حالة الاتصال', 'آخر ملاحظة'] : columns[view];
+  if (view === 'devices' && !isDemo()) return ['الجهاز', 'الرقم التسلسلي', 'الطراز', 'الحالة الإدارية', 'حالة الاتصال', 'آخر ملاحظة'];
+  if (view === 'historical-device-users' && hasDeviceUserPunches()) return [...columns[view], 'الحركات'];
+  return columns[view];
 }
 
 function applyPortalMode() {
@@ -82,6 +95,7 @@ function applyPortalMode() {
   $('addPersonDialog').hidden = true;
   $('addPersonForm').inert = true;
   document.querySelectorAll('[data-ingest-only]').forEach(node => { node.hidden = !hasReceivedRecords(); });
+  document.querySelectorAll('[data-device-changes-only]').forEach(node => { node.hidden = !hasDeviceUserChanges(); });
   $('statsGrid').classList.toggle('ingest-stats', hasReceivedRecords());
   if (hasReceivedRecords()) {
     for (const [id, text] of Object.entries({
@@ -115,7 +129,9 @@ function showNotice(message, kind = 'error') {
 
 async function api(url, options = {}) {
   const headers = { Accept: 'application/json', ...options.headers };
-  const init = { ...options, headers, credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000) };
+  const timeout = AbortSignal.timeout(15000);
+  const signal = options.signal ? AbortSignal.any([timeout, options.signal]) : timeout;
+  const init = { ...options, headers, credentials: 'same-origin', cache: 'no-store', signal };
   if (options.body !== undefined) {
     headers['Content-Type'] = 'application/json';
     headers['X-CSRF-Token'] = state.session?.csrfToken || '';
@@ -142,8 +158,16 @@ function connectionError(error) {
 }
 
 function viewFromHash() {
-  const view = window.location.hash.slice(1);
+  const view = window.location.hash.slice(1).split('?')[0];
   return allowedView(view) ? view : 'overview';
+}
+
+function punchIdentityFromHash() {
+  if (!hasDeviceUserPunches()) return null;
+  const [view, query] = window.location.hash.slice(1).split('?');
+  if (view !== 'received-punches' || !query) return null;
+  const rowId = new URLSearchParams(query).get('deviceUserRowId');
+  return rowId && /^[1-9][0-9]{0,19}$/.test(rowId) && BigInt(rowId) <= 18446744073709551615n ? rowId : null;
 }
 
 function toggleMenu(open) {
@@ -156,6 +180,12 @@ function toggleMenu(open) {
 function setView(view) {
   if (!allowedView(view)) return;
   clearTimeout(searchTimer);
+  const deviceUserRowId = view === 'received-punches' ? punchIdentityFromHash() : null;
+  if (deviceUserRowId !== state.deviceUserRowId && view === 'received-punches') {
+    state.pages[view] = 1;
+    state.searches[view] = '';
+  }
+  state.deviceUserRowId = deviceUserRowId;
   state.view = view;
   state.list = null;
   const [title, description] = (isDemo() ? descriptions : databaseDescriptions)[view];
@@ -171,11 +201,12 @@ function setView(view) {
   });
   $('overviewView').hidden = view !== 'overview';
   $('listView').hidden = view === 'overview';
+  $('punchIdentityFilter').hidden = !deviceUserRowId;
   $('addPersonButton').hidden = view !== 'people' || !canCreatePerson();
   if (view !== 'overview') {
     $('searchInput').value = state.searches[view];
     const searchPlaceholders = { people: 'ابحث بالاسم أو الكود…', devices: 'ابحث باسم الجهاز أو رقمه…' };
-    $('searchInput').placeholder = Object.hasOwn(deviceRosters, view)
+    $('searchInput').placeholder = Object.hasOwn(deviceRosters, view) || Object.hasOwn(deviceChangeKinds, view)
       ? 'ابحث باسم المستخدم أو رقمه…' : searchPlaceholders[view] || 'ابحث في الحركات…';
     $('listTitle').textContent = title;
     $('tableCaption').textContent = `${title} · ${isDemo() ? 'بيانات تجريبية' : 'قراءة فقط'}`;
@@ -202,6 +233,7 @@ function setLoading(loading) {
 
 async function loadView({ preserveNotice = false } = {}) {
   if (!state.session) return;
+  closeUserPunches();
   const view = state.view;
   const request = ++state.request;
   if (!preserveNotice) $('globalNotice').hidden = true;
@@ -215,8 +247,12 @@ async function loadView({ preserveNotice = false } = {}) {
     } else {
       const parameters = new URLSearchParams({ page: String(state.pages[view]), limit: '10', search: state.searches[view] });
       const roster = deviceRosters[view];
+      const kind = deviceChangeKinds[view];
       if (roster) parameters.set('roster', roster);
-      const data = await api(`/api/portal/${roster ? 'device-users' : view}?${parameters}`);
+      if (kind) parameters.set('kind', kind);
+      if (view === 'received-punches' && state.deviceUserRowId) parameters.set('deviceUserRowId', state.deviceUserRowId);
+      const resource = roster ? 'device-users' : kind ? 'device-user-changes' : view;
+      const data = await api(`/api/portal/${resource}?${parameters}`);
       if (request !== state.request) return;
       state.list = data;
       renderList(view, data);
@@ -288,6 +324,139 @@ function localTime(value) {
   return Number.isNaN(date.getTime()) ? 'وقت غير متاح' : dates.format(date);
 }
 
+function devicePunchTime(item) {
+  if (item.eventTimeLocal) return `وقت الجهاز: ${item.eventTimeLocal}`;
+  const instant = new Date(item.eventTimeUtc ?? '');
+  return Number.isNaN(instant.getTime()) ? 'وقت الجهاز غير متاح' : `وقت الرياض: ${dates.format(instant)}`;
+}
+
+function closeUserPunches() {
+  const punches = state.userPunches;
+  if (!punches) return;
+  state.userPunches = null;
+  punches.controller.abort();
+  punches.button.setAttribute('aria-expanded', 'false');
+  punches.button.removeAttribute('aria-controls');
+  punches.detail.remove();
+}
+
+function appendDeviceUserName(row, item, view) {
+  const name = item.displayName || 'بلا اسم';
+  if (view !== 'device-users' || !hasDeviceUserPunches()) {
+    cell(row, name, 'cell-primary');
+    return;
+  }
+  const button = element('button', name, 'device-user-name');
+  button.type = 'button';
+  button.id = `user-name-${item.id}`;
+  button.setAttribute('aria-expanded', 'false');
+  button.addEventListener('click', () => {
+    const wasOpen = state.userPunches?.button === button;
+    closeUserPunches();
+    if (!wasOpen && state.view === 'device-users' && !state.pending) openUserPunches(row, item.id, button);
+  });
+  cell(row, undefined, 'cell-primary').append(button);
+}
+
+function openUserPunches(row, identity, button) {
+  const detail = element('tr', undefined, 'device-user-punch-detail');
+  const wrapper = cell(detail);
+  wrapper.colSpan = deviceUserColumns.length;
+  const panel = element('div', undefined, 'device-user-punch-panel');
+  panel.id = `user-punches-${identity}`;
+  panel.setAttribute('role', 'region');
+  panel.setAttribute('aria-labelledby', button.id);
+  const status = element('p', undefined, 'device-user-punch-status');
+  status.setAttribute('role', 'status');
+  const table = element('table');
+  table.hidden = true;
+  const heading = element('thead');
+  const headings = element('tr');
+  for (const title of ['التاريخ والوقت', 'حالة الحركة']) {
+    const header = element('th', title);
+    header.scope = 'col';
+    headings.append(header);
+  }
+  heading.append(headings);
+  const body = element('tbody');
+  table.append(heading, body);
+  const more = element('button', 'تحميل المزيد', 'button button-secondary button-small');
+  more.type = 'button';
+  more.hidden = true;
+  const punches = { identity, detail, panel, button, status, table, body, more, page: 0, loading: false, controller: new AbortController() };
+  more.addEventListener('click', () => loadUserPunches(punches));
+  panel.append(element('h3', 'الحركات المستلمة'), status, table, more);
+  wrapper.append(panel);
+  row.after(detail);
+  button.setAttribute('aria-controls', panel.id);
+  button.setAttribute('aria-expanded', 'true');
+  state.userPunches = punches;
+  loadUserPunches(punches);
+}
+
+async function loadUserPunches(punches) {
+  if (state.userPunches !== punches || punches.loading) return;
+  const { session } = state;
+  const { identity, panel, table, body, status, more, controller } = punches;
+  const next = punches.page + 1;
+  punches.loading = true;
+  panel.setAttribute('aria-busy', 'true');
+  status.textContent = 'جارٍ تحميل الحركات…';
+  more.disabled = true;
+  try {
+    const parameters = new URLSearchParams({ deviceUserRowId: identity, page: String(next), limit: '10' });
+    const data = await api(`/api/portal/received-punches?${parameters}`, { signal: controller.signal });
+    if (state.userPunches !== punches || state.session !== session) return;
+    for (const item of data.items) {
+      const row = element('tr');
+      cell(row, devicePunchTime(item));
+      const stateLabel = devicePunchStates.get(item.punchState)
+        ?? (item.devicePunchState == null ? 'غير مسجلة' : `غير معروفة · الرمز ${item.devicePunchState}`);
+      cell(row, stateLabel);
+      body.append(row);
+    }
+    punches.page = next;
+    if (data.items.length) table.hidden = false;
+    status.textContent = table.hidden ? 'لا توجد حركات مستلمة لهذا المستخدم.' : '';
+    more.textContent = 'تحميل المزيد';
+    more.hidden = next >= data.page.totalPages;
+  } catch (error) {
+    if (state.userPunches !== punches || state.session !== session) return;
+    status.textContent = connectionError(error);
+    more.textContent = 'إعادة المحاولة';
+    more.hidden = false;
+  } finally {
+    if (state.userPunches === punches) {
+      panel.setAttribute('aria-busy', 'false');
+      punches.loading = false;
+      more.disabled = false;
+    }
+  }
+}
+
+function appendDeviceUserChanges(row, before, after) {
+  const statuses = new Map([['active', 'نشط'], ['seen', 'حالي'], ['absent_from_device', 'تاريخي']]);
+  const labels = { Pri: 'الصلاحية', Grp: 'المجموعة', TZ: 'المنطقة الزمنية', Verify: 'طريقة التحقق',
+    StartDatetime: 'بداية الصلاحية', EndDatetime: 'نهاية الصلاحية' };
+  const changes = [];
+  if (before.displayName !== after.displayName) changes.push(['الاسم', before.displayName || 'بلا اسم', after.displayName || 'بلا اسم']);
+  if (before.status !== after.status) changes.push(['الحالة', statuses.get(before.status) ?? 'غير معروف', statuses.get(after.status) ?? 'غير معروف']);
+  for (const [field, label] of Object.entries(labels)) {
+    const previous = before.metadata?.[field] ?? null;
+    const next = after.metadata?.[field] ?? null;
+    if (previous !== next) changes.push([label, previous ?? '—', next ?? '—']);
+  }
+  for (const index of [1, 2]) {
+    const detail = cell(row);
+    if (!changes.length) detail.textContent = '—';
+    for (const change of changes) {
+      const entry = element('span', undefined, 'cell-stack');
+      entry.append(element('small', change[0], 'muted'), element('strong', change[index]));
+      detail.append(entry);
+    }
+  }
+}
+
 function renderList(view, data) {
   $('tableBody').replaceChildren();
   const items = Array.isArray(data.items) ? data.items : [];
@@ -304,7 +473,8 @@ function renderList(view, data) {
   const nouns = isDemo()
     ? { devices: 'جهاز تجريبي', people: 'شخص في مساحة التجربة', events: 'حركة تجريبية' }
     : { devices: 'جهاز مسجل', people: 'شخص مسجل', events: 'حركة نهائية', 'received-punches': 'سجل استقبال',
-      'device-users': 'مستخدم جهاز', 'historical-device-users': 'مستخدم تاريخي' };
+      'device-users': 'مستخدم جهاز', 'historical-device-users': 'مستخدم تاريخي',
+      'new-device-users': 'إضافة مسجّلة', 'device-user-changes': 'تعديل مسجّل' };
   $('listTotal').textContent = `${numbers.format(total)} ${nouns[view]}`;
   if (!items.length) renderEmpty();
   for (const item of items) {
@@ -331,13 +501,30 @@ function renderList(view, data) {
       cell(row).append(badge(item.parseValid ? statuses[item.processingStatus] || 'تحتاج مراجعة' : 'صيغة غير معتمدة'));
       cell(row).append(badge(item.hasFinalEvent ? 'محفوظ' : 'لم يُنشأ', item.hasFinalEvent ? 'badge-success' : 'badge-neutral'));
     } else if (roster) {
-      cell(row, item.displayName || 'بلا اسم', 'cell-primary');
+      appendDeviceUserName(row, item, view);
       cell(row, item.deviceUserId || '—', 'cell-code');
       cell(row, item.deviceName || '—');
       cell(row).append(badge(item.status === 'absent_from_device' ? 'تاريخي · Historical' : 'حالي · Current',
         item.status === 'absent_from_device' ? 'badge-neutral' : 'badge-success'));
       cell(row, item.mappedPersonName || item.mappedPersonCode || 'غير مرتبط');
       cell(row, item.lastSeenAt ? localTime(item.lastSeenAt) : 'غير متاح');
+      if (view === 'historical-device-users' && hasDeviceUserPunches()) {
+        const open = element('button', 'عرض الحركات', 'button button-secondary button-small');
+        open.type = 'button';
+        open.setAttribute('aria-label', `عرض حركات الهوية التاريخية للرقم ${item.deviceUserId}`);
+        open.addEventListener('click', () => { window.location.hash = `received-punches?deviceUserRowId=${encodeURIComponent(item.id)}`; });
+        cell(row).append(open);
+      }
+    } else if (view === 'new-device-users') {
+      cell(row, item.after.displayName ?? 'بلا اسم', 'cell-primary');
+      cell(row, item.deviceUserId, 'cell-code');
+      cell(row, item.deviceName);
+      cell(row, localTime(item.occurredAt));
+    } else if (view === 'device-user-changes') {
+      cell(row, item.deviceUserId, 'cell-code');
+      cell(row, item.deviceName);
+      appendDeviceUserChanges(row, item.before, item.after);
+      cell(row, localTime(item.occurredAt));
     } else {
       const person = cell(row);
       const stack = element('span', undefined, 'cell-stack');
@@ -355,8 +542,9 @@ function renderList(view, data) {
   }
   const nav = { devices: 'navDevicesCount', people: 'navPeopleCount', events: 'navEventsCount',
     'received-punches': 'navReceivedCount', 'device-users': 'navDeviceUsersCount',
-    'historical-device-users': 'navHistoricalDeviceUsersCount' }[view];
-  if (!state.searches[view] && !roster) $(nav).textContent = numbers.format(total);
+    'historical-device-users': 'navHistoricalDeviceUsersCount', 'new-device-users': 'navNewDeviceUsersCount',
+    'device-user-changes': 'navDeviceUserChangesCount' }[view];
+  if (!state.searches[view] && !roster && !state.deviceUserRowId) $(nav).textContent = numbers.format(total);
   updatePagination(data.page);
 }
 
@@ -384,10 +572,11 @@ function submitSearch() {
 
 document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => {
   const view = button.dataset.view;
-  if (window.location.hash === `#${view}` || view === state.view) setView(view);
+  if (window.location.hash === `#${view}`) setView(view);
   else window.location.hash = view;
 }));
 window.addEventListener('hashchange', () => setView(viewFromHash()));
+$('clearPunchIdentityFilter').addEventListener('click', () => { window.location.hash = 'received-punches'; });
 $('refreshButton').addEventListener('click', () => state.session ? loadView() : initializeSession());
 $('menuToggle').addEventListener('click', () => toggleMenu(!document.body.classList.contains('sidebar-open')));
 $('sidebarBackdrop').addEventListener('click', () => toggleMenu(false));

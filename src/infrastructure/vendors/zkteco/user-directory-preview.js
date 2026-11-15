@@ -1,7 +1,9 @@
 const maxUsers = 10000;
 const previewRetentionMs = 30 * 60 * 1000;
 
-export function createUserDirectoryPreview() {
+const metadataKeys = ['Pri', 'Grp', 'TZ', 'Verify', 'StartDatetime', 'EndDatetime'];
+
+export function createUserDirectoryPreview({ includeMetadata = false, now = Date.now } = {}) {
   const profiles = new Map();
   const conflicts = new Set();
   let invalidCount = 0;
@@ -15,7 +17,7 @@ export function createUserDirectoryPreview() {
       const lines = body.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
       const userCount = observation.records.filter(record => record.kind === 'device_user').length;
       if (userCount === 0) return null;
-      lastUploadAt = Date.now();
+      lastUploadAt = now();
       invalidCount += observation.unrecognizedCount;
       for (const [index, record] of observation.records.entries()) {
         if (record.kind !== 'device_user') continue;
@@ -25,17 +27,23 @@ export function createUserDirectoryPreview() {
           continue;
         }
         const { deviceUserId, displayName } = profile;
-        if (!profiles.has(deviceUserId)) profiles.set(deviceUserId, displayName);
-        else if (profiles.get(deviceUserId) !== displayName) conflicts.add(deviceUserId);
+        const projected = includeMetadata ? { displayName, nameReported: Object.hasOwn(record.fields, 'Name'),
+          metadata: Object.fromEntries(metadataKeys.flatMap(key => {
+            const value = record.fields[key];
+            return typeof value === 'string' && !/[\u0000-\u001f\u007f]/.test(value) &&
+              !value.startsWith('[OMITTED:') && value !== '[REDACTED]' ? [[key, value]] : [];
+          })) } : { displayName };
+        if (!profiles.has(deviceUserId)) profiles.set(deviceUserId, projected);
+        else if (JSON.stringify(profiles.get(deviceUserId)) !== JSON.stringify(projected)) conflicts.add(deviceUserId);
       }
       return { type: 'user_directory_preview_profiles', probeProfileCount: profiles.size };
     },
     snapshot({ sentAt, commandAccepted, responseWindowMs }) {
-      const age = sentAt == null ? 0 : Date.now() - sentAt;
+      const age = sentAt == null ? 0 : now() - sentAt;
       const expired = age >= previewRetentionMs;
       if (expired) { profiles.clear(); conflicts.clear(); }
-      const items = Array.from(profiles, ([deviceUserId, displayName]) => ({
-        deviceUserId, displayName: conflicts.has(deviceUserId) ? null : displayName,
+      const items = Array.from(profiles, ([deviceUserId, profile]) => ({
+        deviceUserId, ...profile, displayName: conflicts.has(deviceUserId) ? null : profile.displayName,
         conflictingName: conflicts.has(deviceUserId)
       }));
       let state = 'waiting_for_device';

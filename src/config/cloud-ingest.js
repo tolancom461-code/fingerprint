@@ -21,6 +21,12 @@ export function loadCloudIngestConfig(env = process.env) {
   const allowedDevices = required(env, 'BIOMETRIC_INGEST_ALLOWED_DEVICES').split(',');
   if (allowedDevices.length > 100 || allowedDevices.some(value => !/^zkteco:[A-Za-z0-9_-]{1,128}$/.test(value)) ||
       new Set(allowedDevices).size !== allowedDevices.length) throw invalid();
+  const directorySyncDevice = env.BIOMETRIC_INGEST_USER_DIRECTORY_SYNC_DEVICE || null;
+  const directorySyncMode = env.BIOMETRIC_INGEST_USER_DIRECTORY_SYNC_MODE || (directorySyncDevice ? 'observe' : null);
+  if ((directorySyncDevice === null) !== (directorySyncMode === null) ||
+      (directorySyncDevice && (!allowedDevices.includes(directorySyncDevice) || !['observe', 'active'].includes(directorySyncMode) ||
+        [env.BIOMETRIC_INGEST_USER_QUERY_PROBE, env.BIOMETRIC_INGEST_USER_DIRECTORY_PREVIEW,
+          env.BIOMETRIC_INGEST_BIODATA_DISCARD_DEVICE].some(Boolean)))) throw invalid();
   // Finalization is a later, deliberate activation after history reconciliation.
   if (env.BIOMETRIC_INGEST_AUTO_FINALIZE_NEW_PUNCHES !== undefined && env.BIOMETRIC_INGEST_AUTO_FINALIZE_NEW_PUNCHES !== 'false') throw invalid();
   let portal;
@@ -49,6 +55,7 @@ export function loadCloudIngestConfig(env = process.env) {
     userQueryProbe: env.BIOMETRIC_INGEST_USER_QUERY_PROBE,
     userDirectoryPreview: env.BIOMETRIC_INGEST_USER_DIRECTORY_PREVIEW,
     biodataDiscardDevice: env.BIOMETRIC_INGEST_BIODATA_DISCARD_DEVICE,
+    directorySyncDevice, directorySyncMode,
     maxBodyBytes: integer(env.BIOMETRIC_INGEST_MAX_BODY_BYTES, 524288, 1024, 524288),
     autoFinalizeNewPunches: false,
     retrySweepSeconds: integer(env.BIOMETRIC_INGEST_RETRY_SWEEP_SECONDS, 2, 1, 3600),
@@ -57,6 +64,7 @@ export function loadCloudIngestConfig(env = process.env) {
     adms: Object.freeze({ delaySeconds: 10, errorDelaySeconds: 60, realtime: 1, encrypt: 0 }),
     database: Object.freeze({ host: databaseHost, port: integer(env.BIOMETRIC_INGEST_DB_PORT, 4000, 1, 65535),
       user, password, database: 'fingerprint', confirmedName: 'fingerprint', sslMode, connectionLimit: 5,
+      directorySyncEnabled: directorySyncMode === 'active',
       connectTimeoutMs: integer(env.BIOMETRIC_INGEST_DB_CONNECT_TIMEOUT_MS, 6000, 100, 10000),
       queryTimeoutMs: integer(env.BIOMETRIC_INGEST_DB_QUERY_TIMEOUT_MS, 5000, 100, 10000),
       transactionTimeoutMs: integer(env.BIOMETRIC_INGEST_DB_TRANSACTION_TIMEOUT_MS, 15000, 1000, 30000) }) });

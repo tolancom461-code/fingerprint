@@ -82,3 +82,60 @@ test('current, historical and all totals remain distinct and never expose privat
   reads.pageDeviceUsers = async query => ({ ...await original(query), rosterCounts: { current: 175, historical: 7, all: 181 } });
   await assert.rejects(service.listDeviceUsers(), { code: 'INGEST_PORTAL_DATA_INVALID' });
 });
+
+test('identity receipt filter is passed as a lossless validated unsigned string', async () => {
+  const reads = store();
+  const base = reads.pageReceivedPunches;
+  const calls = [];
+  reads.pageReceivedPunches = async query => { calls.push(query); return base(query); };
+  const service = createIngestPortalService({ readStore: reads });
+  const deviceUserRowId = '18446744073709551615';
+  await service.listReceivedPunches({ deviceUserRowId });
+  assert.equal(calls[0].deviceUserRowId, deviceUserRowId);
+  for (const invalid of [null, 1, '', '0', '01', '1 OR 1=1', '18446744073709551616']) {
+    await assert.rejects(service.listReceivedPunches({ deviceUserRowId: invalid }), { code: 'INVALID_INPUT' });
+  }
+  assert.equal(calls.length, 1);
+});
+
+test('identity receipts expose the terminal code and supported status together, preserving unclassified codes', async () => {
+  const reads = store();
+  const base = reads.pageReceivedPunches;
+  const service = createIngestPortalService({ readStore: reads });
+  reads.pageReceivedPunches = async () => {
+    const original = await base();
+    return { ...original, items: [{ ...original.items[0], device_punch_state: '3', punch_state: 'break_in' }] };
+  };
+  const receipt = (await service.listReceivedPunches({ deviceUserRowId: '91' })).items[0];
+  assert.equal(receipt.devicePunchState, '3');
+  assert.equal(receipt.punchState, 'break_in');
+  assert.ok(!('devicePunchState' in (await service.listReceivedPunches()).items[0]));
+  reads.pageReceivedPunches = async () => {
+    const original = await base();
+    return { ...original, items: [{ ...original.items[0], device_punch_state: '9', punch_state: 'unknown' }] };
+  };
+  const unknown = (await service.listReceivedPunches({ deviceUserRowId: '91' })).items[0];
+  assert.equal(unknown.devicePunchState, '9');
+  assert.equal(unknown.punchState, null);
+});
+
+test('directory updates and additions project safe snapshots and keep the device number intact', async () => {
+  const reads = store();
+  reads.directorySyncEnabled = true;
+  reads.pageDeviceUserChanges = async ({ kind }) => ({ items: [{ id: '18446744073709551600', device_user_row_id: '91',
+    device_user_id: '00017', device_name: 'Fixture terminal', occurred_at: '2026-11-09 07:15:02.123456',
+    before_display_name: null, before_status: 'seen', before_pri: '0', before_grp: '1', before_passwd: 'never leak',
+    after_display_name: 'New name', after_status: 'seen', after_pri: '1', after_grp: '1', after_tz: '2',
+    after_state: { Passwd: 'never leak' }, notes: 'never leak', kind }],
+  page: { number: 1, limit: 10, total: 1, totalPages: 1 } });
+  const service = createIngestPortalService({ readStore: reads });
+  const result = await service.listDeviceUserChanges({ kind: 'updated' });
+  assert.deepEqual(result.items[0], { id: '18446744073709551600', deviceUserRowId: '91', deviceUserId: '00017',
+    deviceName: 'Fixture terminal', occurredAt: '2026-11-09T07:15:02.123456Z',
+    before: { displayName: null, status: 'seen', metadata: { Pri: '0', Grp: '1' } },
+    after: { displayName: 'New name', status: 'seen', metadata: { Pri: '1', Grp: '1', TZ: '2' } } });
+  assert.equal(JSON.stringify(result).includes('never leak'), false);
+  const additions = await service.listDeviceUserChanges({ kind: 'added' });
+  assert.equal(additions.items[0].before, null);
+  await assert.rejects(service.listDeviceUserChanges({ kind: 'archived' }), { code: 'INVALID_INPUT' });
+});
