@@ -21,6 +21,7 @@ export function createUserQueryProbe(setting, allowedDevices, directorySetting) 
   const target = device => `${device.vendor}:${device.serialNumber}` === deviceKey;
   const withinWindow = device => target(device) && sentAt !== null && Date.now() - sentAt <= responseWindowMs;
   return Object.freeze({
+    isDirectoryTarget(device) { return directory && target(device); },
     takeCommand(device) {
       if (!target(device) || sentAt !== null) return null;
       sentAt = Date.now();

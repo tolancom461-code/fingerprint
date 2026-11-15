@@ -151,7 +151,8 @@ test('one authorized read of an existing name reports matching evidence without 
 });
 
 test('directory preview collects unique profiles across batches and exposes them only to the portal admin', async t => {
-  const lab = await start(t, { includeViewer: true, userDirectoryPreview: 'zkteco:TEST-DEVICE' });
+  const lab = await start(t, { includeViewer: true, userDirectoryPreview: 'zkteco:TEST-DEVICE',
+    allowedDevices: ['zkteco:TEST-DEVICE', 'zkteco:OTHER-DEVICE'], userProfilePushDevices: ['zkteco:TEST-DEVICE'] });
   const preview = `${lab.base}/api/portal/device-directory-preview`;
   const admin = await login(lab);
   const viewer = await login(lab, 'test-viewer');
@@ -165,6 +166,9 @@ test('directory preview collects unique profiles across batches and exposes them
   };
   assert.equal((await readPreview()).state, 'waiting_for_device');
   const headers = { Authorization: `Bearer ${token}` };
+  const handshake = device => fetch(`${lab.base}/iclock/cdata?SN=${device}&options=all&pushver=2.4.1`, {headers});
+  assert.match(await (await handshake('TEST-DEVICE')).text(), /^TransFlag=1100000000$/m);
+  assert.match(await (await handshake('OTHER-DEVICE')).text(), /^TransFlag=1111000000$/m);
   const post = body => fetch(`${lab.base}/iclock/cdata?SN=TEST-DEVICE&table=OPERLOG`, { method: 'POST', headers, body });
   assert.equal((await post('USER PIN=9\tName=Earlier Update')).status, 200);
   assert.equal((await readPreview()).observedCount, 0);
@@ -189,6 +193,20 @@ test('directory preview collects unique profiles across batches and exposes them
   assert.doesNotMatch(JSON.stringify(result), /private-card|Original|Different/);
   assert.doesNotMatch(JSON.stringify(lab.logs), /private-card|Existing Person/);
   assert.equal(writes(lab.state).some(call => call.sql.includes('biometric_svc_device_users')), false);
+});
+
+test('discarded biometric uploads log only the known table and byte count', async t => {
+  const lab = await start(t);
+  const body = 'synthetic-biometric-payload-that-must-not-be-logged';
+  const post = table => fetch(`${lab.base}/iclock/cdata?SN=TEST-DEVICE&table=${table}`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}` }, body
+  });
+  assert.equal((await post('BioData')).status, 503);
+  assert.equal((await post('private-unknown-tag')).status, 503);
+  const { occurredAt, ...biometric } = lab.logs.find(entry => entry.type === 'biometric_payload_discarded');
+  assert.deepEqual(biometric, { type: 'biometric_payload_discarded', table: 'BIODATA', bytes: Buffer.byteLength(body) });
+  assert.doesNotMatch(JSON.stringify(lab.logs), /synthetic-biometric-payload|private-unknown-tag|TEST-DEVICE/);
+  assert.ok(writes(lab.state).every(call => call.sql.includes('biometric_svc_devices')));
 });
 async function login(lab, username = 'test-admin') {
   const response = await fetch(lab.base + '/auth/login', { method: 'POST',

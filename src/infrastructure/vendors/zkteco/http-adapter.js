@@ -99,7 +99,8 @@ export class ZktecoAdmsAdapter {
     if (req.method === 'GET' && request.pathname === '/iclock/cdata') {
       const requestUserProfiles = request.pushProtocolVersion === USER_PROFILE_PUSH_PROTOCOL &&
         this.userProfilePushDevices.has(`${VENDOR}:${request.serialNumber}`);
-      return text(res, 200, buildHandshakeResponse(request.serialNumber, this.config.adms, { requestUserProfiles }));
+      const directoryPreview = this.userQueryProbe?.isDirectoryTarget(device) ?? false;
+      return text(res, 200, buildHandshakeResponse(request.serialNumber, this.config.adms, { requestUserProfiles, directoryPreview }));
     }
 
     if (req.method === 'POST' && request.pathname === '/iclock/cdata') {

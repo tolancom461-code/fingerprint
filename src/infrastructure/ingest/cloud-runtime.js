@@ -17,6 +17,7 @@ import { startDurableIngestRetryLoop } from '../../application/start-durable-ing
 import { startAutomaticFinalizationRetryLoop } from '../../application/start-automatic-finalization-retry-loop.js';
 import { VendorAdapterRegistry } from '../vendors/vendor-adapter-registry.js';
 import { ZktecoAdmsAdapter } from '../vendors/zkteco/http-adapter.js';
+import { looksLikeBiometricTemplateTable } from '../vendors/zkteco/adms-parser.js';
 import { createUserQueryProbe } from '../vendors/zkteco/user-query-probe.js';
 import { createHttpServer } from '../http/server.js';
 import { createCloudIngestPortalHandler } from '../portal/server.js';
@@ -138,6 +139,10 @@ export async function startCloudIngest({ config, openDatabase = createIngestData
 function sanitizedLog(sink) {
   return Object.freeze({ async write(entry) {
     const clean = { type: LOG_TYPES.has(entry?.type) ? entry.type : 'diagnostic', occurredAt: new Date().toISOString() };
+    if (clean.type === 'biometric_payload_discarded' && looksLikeBiometricTemplateTable(entry.table)) {
+      clean.table = entry.table.trim().toUpperCase();
+      if (Number.isSafeInteger(entry.bytes) && entry.bytes >= 0) clean.bytes = entry.bytes;
+    }
     for (const field of LOG_COUNTS) {
       const value = entry?.[field];
       if (Number.isSafeInteger(value) && value >= 0) clean[field] = value;
