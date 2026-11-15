@@ -26,12 +26,12 @@ export function createReadOnlyPortalHandler({ config, readStore }) {
   return createPortalHandler({ config, service: createReadOnlyPortalService({ readStore }), mode: 'database-readonly' });
 }
 
-export function createCloudIngestPortalHandler({ config, readStore, connectionDiagnostics = null }) {
+export function createCloudIngestPortalHandler({ config, readStore, connectionDiagnostics = null, deviceDirectoryPreview = null }) {
   return createPortalHandler({ config, service: createIngestPortalService({ readStore }), mode: 'database-ingest',
-    connectionDiagnostics });
+    connectionDiagnostics, deviceDirectoryPreview });
 }
 
-function createPortalHandler({ config, service, mode, connectionDiagnostics = null }) {
+function createPortalHandler({ config, service, mode, connectionDiagnostics = null, deviceDirectoryPreview = null }) {
   const auth = createPortalAuth(config);
   const expectedHost = new URL(config.origin).host.toLowerCase();
   const secure = config.origin.startsWith('https:');
@@ -86,6 +86,11 @@ function createPortalHandler({ config, service, mode, connectionDiagnostics = nu
         requireSession(session);
         const filters = Object.fromEntries(['search', 'page', 'limit'].map(key => [key, url.searchParams.get(key) ?? undefined]));
         if (req.method === 'GET') {
+          if (deviceDirectoryPreview && pathname === '/api/portal/device-directory-preview') {
+            if (session.user.role !== 'admin') throw coded('FORBIDDEN', 'هذه المعاينة متاحة لمدير النظام فقط', 403);
+            json(res, 200, deviceDirectoryPreview());
+            return true;
+          }
           if (mode === 'database-ingest' && connectionDiagnostics &&
               pathname === '/api/portal/device-connection-diagnostics') {
             if (session.user.role !== 'admin') throw coded('FORBIDDEN', 'هذا الفحص متاح لمدير النظام فقط', 403);

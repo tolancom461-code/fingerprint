@@ -31,7 +31,7 @@ const defaultLog = Object.freeze({ async write(entry) { process.stdout.write(JSO
 const LOG_TYPES = new Set([
   'cloud_ingest_started', 'cloud_ingest_stopped', 'machine_auth_rejected', 'device_rejected', 'device_policy_rejected',
   'device_request', 'device_options_observed', 'device_operlog_observed', 'devicecmd_result_observed',
-  'user_query_probe_sent', 'user_query_probe_reply', 'user_query_probe_profile_observed',
+  'user_query_probe_sent', 'user_query_probe_reply', 'user_query_probe_profile_observed', 'user_directory_preview_profiles',
   'biometric_payload_discarded', 'unsupported_cdata_discarded', 'punch_batch', 'canonical_punch_processing_failed',
   'canonical_punch_replay_failed', 'durable_ingest_replay_completed', 'durable_ingest_retry_sweep_completed',
   'durable_ingest_retry_sweep_failed', 'automatic_finalization_failed', 'automatic_finalization_succeeded',
@@ -53,7 +53,7 @@ export async function startCloudIngest({ config, openDatabase = createIngestData
   const log = sanitizedLog(diagnosticLog);
   try {
     const { basicCredentials, consumerApi, userProfilePushDevices } = validateRuntimeConfig(config);
-    const userQueryProbe = createUserQueryProbe(config.userQueryProbe, config.allowedDevices);
+    const userQueryProbe = createUserQueryProbe(config.userQueryProbe, config.allowedDevices, config.userDirectoryPreview);
     database = await openDatabase(config.database);
     const databaseReady = await database.checkReady();
     const deviceUserIdentityEnabled = databaseReady?.deviceUserIdentityEnabled === true;
@@ -78,7 +78,7 @@ export async function startCloudIngest({ config, openDatabase = createIngestData
       basicCredentials, diagnosticLog: log,
       rejectedRequestObserver: req => connectionDiagnostics.recordRejectedRequest(req) });
     const portal = createCloudIngestPortalHandler({ config: config.portal, readStore: new TiDbIngestReadStore(database),
-      connectionDiagnostics });
+      connectionDiagnostics, deviceDirectoryPreview: userQueryProbe?.directorySnapshot });
     const consumerHandler = consumerApi ? createFinalEventsApiHandler({
       service: new FinalEventsReadService({ readStore: new TiDbFinalEventsReadStore(database) }),
       personDirectoryService: new PersonDirectoryReadService({ readStore: new TiDbPersonDirectoryReadStore(database) }),

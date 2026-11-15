@@ -62,7 +62,7 @@ function configuration(port) {
     adms: { delaySeconds: 10, errorDelaySeconds: 60, realtime: 1, encrypt: 0 } };
 }
 async function start(t, { includeViewer = false, retrySweepSeconds = 1, basicCredentials, consumerApi,
-  allowedDevices, userProfilePushDevices, userQueryProbe } = {}) {
+  allowedDevices, userProfilePushDevices, userQueryProbe, userDirectoryPreview } = {}) {
   const fixture = fakeDatabase();
   const logs = [];
   const config = configuration(await freePort());
@@ -72,6 +72,7 @@ async function start(t, { includeViewer = false, retrySweepSeconds = 1, basicCre
   if (allowedDevices !== undefined) config.allowedDevices = allowedDevices;
   if (userProfilePushDevices !== undefined) config.userProfilePushDevices = userProfilePushDevices;
   if (userQueryProbe !== undefined) config.userQueryProbe = userQueryProbe;
+  if (userDirectoryPreview !== undefined) config.userDirectoryPreview = userDirectoryPreview;
   if (includeViewer) config.portal.users.push({ username: 'test-viewer', passwordHash, role: 'viewer' });
   const runtime = await startCloudIngest({ config, openDatabase: async settings => {
     assert.equal(settings, config.database); return fixture.database;
@@ -146,6 +147,47 @@ test('one authorized read of an existing name reports matching evidence without 
     { type: 'user_query_probe_reply', probeAccepted: 1 }
   ]);
   assert.doesNotMatch(JSON.stringify(lab.logs), /Synthetic Existing Name|synthetic-secret/);
+  assert.equal(writes(lab.state).some(call => call.sql.includes('biometric_svc_device_users')), false);
+});
+
+test('directory preview collects unique profiles across batches and exposes them only to the portal admin', async t => {
+  const lab = await start(t, { includeViewer: true, userDirectoryPreview: 'zkteco:TEST-DEVICE' });
+  const preview = `${lab.base}/api/portal/device-directory-preview`;
+  const admin = await login(lab);
+  const viewer = await login(lab, 'test-viewer');
+  assert.equal((await fetch(preview)).status, 401);
+  assert.equal((await fetch(preview, { headers: { Cookie: viewer.cookie } })).status, 403);
+  const readPreview = async () => {
+    const response = await fetch(preview, { headers: { Cookie: admin.cookie } });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    return response.json();
+  };
+  assert.equal((await readPreview()).state, 'waiting_for_device');
+  const headers = { Authorization: `Bearer ${token}` };
+  const post = body => fetch(`${lab.base}/iclock/cdata?SN=TEST-DEVICE&table=OPERLOG`, { method: 'POST', headers, body });
+  assert.equal((await post('USER PIN=9\tName=Earlier Update')).status, 200);
+  assert.equal((await readPreview()).observedCount, 0);
+  const poll = `${lab.base}/iclock/getrequest?SN=TEST-DEVICE`;
+  const command = await (await fetch(poll, { headers })).text();
+  assert.match(command, /^C:\d+:DATA QUERY USERINFO\n$/);
+  assert.equal(await (await fetch(poll, { headers })).text(), 'OK');
+  assert.equal((await post('USER PIN=001\tName=Existing Person\tCard=private-card\r\nUSER PIN=2\tName=Original')).status, 200);
+  assert.equal((await post('USER PIN=001\tName=Existing Person\nUSER PIN=2\tName=Different\nUSER PIN=3\tName=\nUSER PIN=4\tPIN=5\tName=Invalid')).status, 200);
+  const result = await readPreview();
+  assert.equal(result.state, 'collecting');
+  assert.equal(result.commandAccepted, null);
+  assert.equal(result.observedCount, 3);
+  assert.equal(result.namedCount, 1);
+  assert.equal(result.conflictingCount, 1);
+  assert.equal(result.invalidCount, 1);
+  assert.deepEqual(result.items, [
+    { deviceUserId: '001', displayName: 'Existing Person', conflictingName: false },
+    { deviceUserId: '2', displayName: null, conflictingName: true },
+    { deviceUserId: '3', displayName: null, conflictingName: false }
+  ]);
+  assert.doesNotMatch(JSON.stringify(result), /private-card|Original|Different/);
+  assert.doesNotMatch(JSON.stringify(lab.logs), /private-card|Existing Person/);
   assert.equal(writes(lab.state).some(call => call.sql.includes('biometric_svc_device_users')), false);
 });
 async function login(lab, username = 'test-admin') {
