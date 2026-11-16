@@ -105,7 +105,7 @@
 
 تطلب تهيئة الجهاز في وضع المعاينة إرسال الحضور وسجل العمليات. يأتي دليل المستخدمين عبر طلب القراءة المستقل. إذا ظل الجهاز يعيد رفع بيانات حيوية سابقة، يسجل الخادم `biometric_payload_discarded` مع نوع جدول معروف وحجم الدفعة، ويستمر الاستبعاد. افحص السجل بعد اتصال الجهاز من جديد لتحديد الدفعة التي ما زالت تنتظر معالجة.
 
-إذا أثبت السجل أن الدفعة المعلقة من نوع `BIODATA`، يدعم وضع المعاينة `BIOMETRIC_INGEST_BIODATA_DISCARD_DEVICE` بقيمة معرّف الجهاز نفسه في `BIOMETRIC_INGEST_USER_DIRECTORY_PREVIEW`. يُفعّل هذا الإعداد مؤقتًا عندما يكون المقصود تجاوز إرسال القوالب إلى الخادم. بعد اكتمال قراءة دفعة مصادق عليها والتحقق من بنية سجلاتها، يرد الخادم بعدد السجلات التي استبعدها. هذا الرد قد يدفع الجهاز إلى إيقاف إعادة إرسال الدفعة. لا يرسل الخادم أمر حذف. تسجل النتيجة `biodata_discard_acknowledged` أو `biodata_discard_rejected` مع الحجم والعدد. بعد انتهاء المعاينة أزل المتغيرين معًا عند إعادة النشر.
+إذا أثبت السجل أن الدفعة المعلقة من نوع `BIODATA`، اضبط `BIOMETRIC_INGEST_BIODATA_DISCARD_DEVICE` على معرّف الجهاز نفسه في `BIOMETRIC_INGEST_USER_DIRECTORY_SYNC_DEVICE` أو `BIOMETRIC_INGEST_USER_DIRECTORY_PREVIEW`. بعد قراءة الدفعة المصادق عليها والتحقق من ترويسات سجلاتها وعدّها، يستبعد الخادم القوالب ويرد بعدد السجلات. يستطيع الجهاز متابعة طابور الرفع بعد الإقرار. تسجل النتيجة `biodata_discard_acknowledged` أو `biodata_discard_rejected` مع الحجم والعدد. عند استخدام المعاينة المؤقتة أزل متغيرَي المعاينة والاستبعاد معًا عند إعادة النشر.
 
 ## المستخدمون التاريخيون وإعادة استخدام الرقم
 
@@ -115,7 +115,7 @@
 
 ### المزامنة السحابية التلقائية لدليل المستخدمين
 
-1. انشر الكود الجديد. في Variables لخدمة البصمة، أزل متغيرات معاينة الدليل ومسبار المستخدم واستبعاد `BIODATA` إن كانت موجودة. أضف `BIOMETRIC_INGEST_USER_DIRECTORY_SYNC_DEVICE=zkteco:<serial>` و`BIOMETRIC_INGEST_USER_DIRECTORY_SYNC_MODE=observe` في نفس النشر. يقتصر هذا الوضع على فحص رد العدّاد، ويستمر حفظ ملفات المستخدمين العادي. ابحث في Deploy Logs عن `@type:user_directory_sync_count_verified` وقارن `recordCount` بعدّاد الجهاز.
+1. انشر الكود الجديد. في Variables لخدمة البصمة، أزل متغيرَي معاينة الدليل ومسبار المستخدم إن كانا موجودين. أضف `BIOMETRIC_INGEST_USER_DIRECTORY_SYNC_DEVICE=zkteco:<serial>` و`BIOMETRIC_INGEST_USER_DIRECTORY_SYNC_MODE=observe` في نفس النشر. عند ثبوت تكرار دفعة `BIODATA` المرفوضة، فعّل `BIOMETRIC_INGEST_BIODATA_DISCARD_DEVICE` لمعرّف الجهاز نفسه. يستمر حفظ ملفات المستخدمين العادي في وضع `observe`. ابحث في Deploy Logs عن `@type:user_directory_sync_count_verified` وقارن `recordCount` بعدّاد الجهاز.
 2. بعد نجاح فحص العدّاد، استخدم حساب إدارة `fingerprint` لمنح `INSERT` على `fingerprint.biometric_svc_audit_log` لحساب `BIOMETRIC_INGEST_DB_USER` الفعلي. أضف المنحة بعد تشغيل النسخة الجديدة؛ النسخة السابقة تتحقق من مجموعة منحها الأصلية. يتطلب هذا المسار مخطط الهويات المرحّل مسبقًا ويستخدم جدول التدقيق الموجود.
 3. غيّر `BIOMETRIC_INGEST_USER_DIRECTORY_SYNC_MODE` إلى `active` وأعد النشر. ابحث عن `@type:user_directory_sync_reconciled`. تعرض البوابة **المستخدمون الجدد** و**التعديلات**، ويمكن فتح الحركات من صف المستخدم التاريخي. للمراقبة المؤقتة أعد الوضع إلى `observe`. تظل منحة التدقيق قابلة للإزالة بعد إيقاف الوضع النشط.
 

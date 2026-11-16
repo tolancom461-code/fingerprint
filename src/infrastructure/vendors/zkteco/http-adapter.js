@@ -23,7 +23,7 @@ const USER_PROFILE_PUSH_PROTOCOL = '2.4.1';
 
 export class ZktecoAdmsAdapter {
   constructor({ config, deviceRegistry, receivePunchBatch, diagnosticLog, deviceStore = null,
-    userProfilePushDevices = [], userQueryProbe = null, userDirectorySync = null, acknowledgeBiodataDiscard = false }) {
+    userProfilePushDevices = [], userQueryProbe = null, userDirectorySync = null, biodataDiscardDevice = null }) {
     this.vendor = VENDOR;
     this.config = config;
     this.deviceRegistry = deviceRegistry;
@@ -33,7 +33,7 @@ export class ZktecoAdmsAdapter {
     this.userProfilePushDevices = new Set(userProfilePushDevices);
     this.userQueryProbe = userQueryProbe;
     this.userDirectorySync = userDirectorySync;
-    this.acknowledgeBiodataDiscard = acknowledgeBiodataDiscard;
+    this.biodataDiscardDevice = biodataDiscardDevice;
   }
 
   matches(req) {
@@ -185,8 +185,8 @@ export class ZktecoAdmsAdapter {
         return text(res, 503, result.safeToAcknowledge ? 'OBSERVED_NOT_ACKNOWLEDGED' : 'UNSAFE_ATTLOG_NOT_ACKNOWLEDGED');
       }
 
-      if (request.table === 'BIODATA' && this.acknowledgeBiodataDiscard &&
-          this.userQueryProbe?.isDirectoryAwaitingUploads(device) && isUnambiguousUpload(req.url)) {
+      if (request.table === 'BIODATA' && this.biodataDiscardDevice === `${VENDOR}:${request.serialNumber}` &&
+          (this.userDirectorySync || this.userQueryProbe?.isDirectoryAwaitingUploads(device)) && isUnambiguousUpload(req.url)) {
         const { bytes, recordCount } = await countDiscardedBiodata(req, this.config.maxBodyBytes);
         const type = recordCount === 0 ? 'biodata_discard_rejected' : 'biodata_discard_acknowledged';
         await this.diagnosticLog.write({ type, table: 'BIODATA', bytes, recordCount });

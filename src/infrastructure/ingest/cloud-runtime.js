@@ -62,10 +62,6 @@ export async function startCloudIngest({ config, openDatabase = createIngestData
   try {
     const { basicCredentials, consumerApi, userProfilePushDevices } = validateRuntimeConfig(config);
     const userQueryProbe = createUserQueryProbe(config.userQueryProbe, config.allowedDevices, config.userDirectoryPreview);
-    const acknowledgeBiodataDiscard = config.biodataDiscardDevice != null && config.biodataDiscardDevice !== '';
-    if (acknowledgeBiodataDiscard && (!userQueryProbe?.directorySnapshot || config.biodataDiscardDevice !== config.userDirectoryPreview)) {
-      throw new Error('BIODATA discard requires the same device as the directory preview');
-    }
     const directorySyncEnabled = config.directorySyncMode === 'active';
     database = await openDatabase(directorySyncEnabled ? { ...config.database, directorySyncEnabled } : config.database);
     const databaseReady = await database.checkReady();
@@ -91,7 +87,7 @@ export async function startCloudIngest({ config, openDatabase = createIngestData
     const receivePunchBatch = new ReceivePunchBatch({ deviceRegistry, ingestStore, punchStore, diagnosticLog: log });
     const adapter = new ZktecoAdmsAdapter({ config: { adms: config.adms, maxBodyBytes: config.maxBodyBytes, attlogAckMode: 'ack' },
       deviceRegistry, receivePunchBatch, diagnosticLog: log, deviceStore, userProfilePushDevices, userQueryProbe, userDirectorySync,
-      acknowledgeBiodataDiscard });
+      biodataDiscardDevice: config.biodataDiscardDevice });
     const registry = createAuthenticatedRegistry({ registry: new VendorAdapterRegistry([adapter]), token: config.token,
       basicCredentials, diagnosticLog: log,
       rejectedRequestObserver: req => connectionDiagnostics.recordRejectedRequest(req) });
@@ -194,8 +190,13 @@ function validateRuntimeConfig(config) {
   }
   if (Boolean(config.directorySyncDevice) !== Boolean(config.directorySyncMode) ||
       (config.directorySyncDevice && (!config.allowedDevices.includes(config.directorySyncDevice) ||
-        !['observe', 'active'].includes(config.directorySyncMode) || config.userQueryProbe || config.userDirectoryPreview ||
-        config.biodataDiscardDevice))) throw new Error('Invalid device directory sync configuration');
+        !['observe', 'active'].includes(config.directorySyncMode) || config.userQueryProbe || config.userDirectoryPreview))) {
+    throw new Error('Invalid device directory sync configuration');
+  }
+  if (config.biodataDiscardDevice && (!config.allowedDevices.includes(config.biodataDiscardDevice) ||
+      config.biodataDiscardDevice !== (config.directorySyncDevice || config.userDirectoryPreview))) {
+    throw new Error('BIODATA discard requires the same device as the directory sync or preview');
+  }
   const basicCredentials = normalizeBasicMachineCredentials(config.basicCredentials);
   const consumerApi = normalizeConsumerApiConfig(config.consumerApi, {
     ingestToken: config.token,

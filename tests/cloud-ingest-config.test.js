@@ -29,9 +29,15 @@ test('directory sync targets one allowed device and requests audit access only i
   rejects({ [mode]: 'active' });
   rejects({ [key]: 'zkteco:OTHER' });
   rejects({ [key]: device, [mode]: 'enabled' });
-  for (const diagnostic of ['USER_QUERY_PROBE', 'USER_DIRECTORY_PREVIEW', 'BIODATA_DISCARD_DEVICE']) {
+  for (const diagnostic of ['USER_QUERY_PROBE', 'USER_DIRECTORY_PREVIEW']) {
     rejects({ [key]: device, ['BIOMETRIC_INGEST_' + diagnostic]: device });
   }
+  const discard = 'BIOMETRIC_INGEST_BIODATA_DISCARD_DEVICE';
+  for (const value of ['observe', 'active']) {
+    assert.equal(loadCloudIngestConfig({ ...environment(), [key]: device, [mode]: value, [discard]: device }).biodataDiscardDevice, device);
+  }
+  rejects({ [discard]: device });
+  rejects({ BIOMETRIC_INGEST_ALLOWED_DEVICES: `${device},zkteco:OTHER`, [key]: device, [discard]: 'zkteco:OTHER' });
 });
 
 test('cloud ingest explicitly selects fingerprint and a distinct writer with automatic finalization disabled', () => {

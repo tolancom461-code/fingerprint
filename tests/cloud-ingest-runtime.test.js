@@ -62,7 +62,7 @@ function configuration(port) {
     adms: { delaySeconds: 10, errorDelaySeconds: 60, realtime: 1, encrypt: 0 } };
 }
 async function start(t, { includeViewer = false, retrySweepSeconds = 1, basicCredentials, consumerApi,
-  allowedDevices, userProfilePushDevices, userQueryProbe, userDirectoryPreview, biodataDiscardDevice } = {}) {
+  allowedDevices, userProfilePushDevices, userQueryProbe, userDirectoryPreview, biodataDiscardDevice, directorySyncDevice } = {}) {
   const fixture = fakeDatabase();
   const logs = [];
   const config = configuration(await freePort());
@@ -74,6 +74,10 @@ async function start(t, { includeViewer = false, retrySweepSeconds = 1, basicCre
   if (userQueryProbe !== undefined) config.userQueryProbe = userQueryProbe;
   if (userDirectoryPreview !== undefined) config.userDirectoryPreview = userDirectoryPreview;
   if (biodataDiscardDevice !== undefined) config.biodataDiscardDevice = biodataDiscardDevice;
+  if (directorySyncDevice !== undefined) {
+    config.directorySyncDevice = directorySyncDevice;
+    config.directorySyncMode = 'observe';
+  }
   if (includeViewer) config.portal.users.push({ username: 'test-viewer', passwordHash, role: 'viewer' });
   const runtime = await startCloudIngest({ config, openDatabase: async settings => {
     assert.equal(settings, config.database); return fixture.database;
@@ -240,6 +244,30 @@ test('BIODATA discard rejects a device outside the configured directory preview 
   let opened = false;
   await assert.rejects(startCloudIngest({ config, openDatabase: async () => { opened = true; } }), { code: 'CLOUD_INGEST_START_FAILED' });
   assert.equal(opened, false);
+});
+
+test('directory monitoring can acknowledge the configured device’s queued BIODATA before its first count poll', async t => {
+  const lab = await start(t, { allowedDevices: ['zkteco:TEST-DEVICE', 'zkteco:OTHER-DEVICE'],
+    directorySyncDevice: 'zkteco:TEST-DEVICE', biodataDiscardDevice: 'zkteco:TEST-DEVICE' });
+  const headers = { Authorization: `Bearer ${token}` };
+  const record = 'BIODATA Pin=17\tNo=0\tIndex=2\tTmp=U1lOVEhFVElD';
+  const submit = (suffix, auth = headers) => fetch(`${lab.base}/iclock/cdata?${suffix}`, { method: 'POST', headers: auth, body: record });
+  const query = 'SN=TEST-DEVICE&table=BIODATA';
+  assert.equal((await submit(query, {})).status, 401);
+  assert.equal((await submit('SN=OTHER-DEVICE&table=BIODATA')).status, 503);
+  assert.equal((await submit(`${query}&sn=OTHER-DEVICE`)).status, 503);
+  const accepted = await submit(query);
+  assert.equal(accepted.status, 200);
+  assert.equal(await accepted.text(), 'OK:1');
+  const poll = await fetch(`${lab.base}/iclock/getrequest?SN=TEST-DEVICE`, { headers });
+  const command = /^C:(\d+):INFO\n$/.exec(await poll.text());
+  assert.ok(command);
+  const reply = await fetch(`${lab.base}/iclock/devicecmd?SN=TEST-DEVICE`, { method: 'POST', headers,
+    body: `ID=${command[1]}&Return=0&CMD=INFO\nUserCount=174` });
+  assert.equal(reply.status, 200);
+  assert.ok(lab.logs.some(entry => entry.type === 'user_directory_sync_count_verified' && entry.recordCount === 174));
+  assert.doesNotMatch(JSON.stringify(lab.logs), /Pin=17|U1lOVEhFVElD/);
+  assert.ok(writes(lab.state).every(call => call.sql.includes('biometric_svc_devices')));
 });
 async function login(lab, username = 'test-admin') {
   const response = await fetch(lab.base + '/auth/login', { method: 'POST',

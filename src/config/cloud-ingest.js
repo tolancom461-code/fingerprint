@@ -23,10 +23,12 @@ export function loadCloudIngestConfig(env = process.env) {
       new Set(allowedDevices).size !== allowedDevices.length) throw invalid();
   const directorySyncDevice = env.BIOMETRIC_INGEST_USER_DIRECTORY_SYNC_DEVICE || null;
   const directorySyncMode = env.BIOMETRIC_INGEST_USER_DIRECTORY_SYNC_MODE || (directorySyncDevice ? 'observe' : null);
+  const biodataDiscardDevice = env.BIOMETRIC_INGEST_BIODATA_DISCARD_DEVICE;
   if ((directorySyncDevice === null) !== (directorySyncMode === null) ||
       (directorySyncDevice && (!allowedDevices.includes(directorySyncDevice) || !['observe', 'active'].includes(directorySyncMode) ||
-        [env.BIOMETRIC_INGEST_USER_QUERY_PROBE, env.BIOMETRIC_INGEST_USER_DIRECTORY_PREVIEW,
-          env.BIOMETRIC_INGEST_BIODATA_DISCARD_DEVICE].some(Boolean)))) throw invalid();
+        env.BIOMETRIC_INGEST_USER_QUERY_PROBE || env.BIOMETRIC_INGEST_USER_DIRECTORY_PREVIEW))) throw invalid();
+  if (biodataDiscardDevice && (!allowedDevices.includes(biodataDiscardDevice) ||
+      biodataDiscardDevice !== (directorySyncDevice ?? env.BIOMETRIC_INGEST_USER_DIRECTORY_PREVIEW))) throw invalid();
   // Finalization is a later, deliberate activation after history reconciliation.
   if (env.BIOMETRIC_INGEST_AUTO_FINALIZE_NEW_PUNCHES !== undefined && env.BIOMETRIC_INGEST_AUTO_FINALIZE_NEW_PUNCHES !== 'false') throw invalid();
   let portal;
@@ -54,7 +56,7 @@ export function loadCloudIngestConfig(env = process.env) {
     token, basicCredentials, consumerApi, allowedDevices: Object.freeze(allowedDevices), userProfilePushDevices,
     userQueryProbe: env.BIOMETRIC_INGEST_USER_QUERY_PROBE,
     userDirectoryPreview: env.BIOMETRIC_INGEST_USER_DIRECTORY_PREVIEW,
-    biodataDiscardDevice: env.BIOMETRIC_INGEST_BIODATA_DISCARD_DEVICE,
+    biodataDiscardDevice,
     directorySyncDevice, directorySyncMode,
     maxBodyBytes: integer(env.BIOMETRIC_INGEST_MAX_BODY_BYTES, 524288, 1024, 524288),
     autoFinalizeNewPunches: false,
