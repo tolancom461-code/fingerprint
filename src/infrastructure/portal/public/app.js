@@ -16,7 +16,8 @@ const databaseDescriptions = {
   'device-users': ['مستخدمو الأجهزة الحاليون', 'المستخدمون الحاليون في دليل الجهاز، مع إبقاء ربطهم بالأشخاص مستقلًا.'],
   'historical-device-users': ['المستخدمون التاريخيون', 'هويات محفوظة لحركاتها السابقة وروابطها بالأشخاص.'],
   'new-device-users': ['المستخدمون الجدد', 'المستخدمون الذين سجّل النظام إضافتهم إلى دليل الجهاز.'],
-  'device-user-changes': ['التعديلات', 'القيم السابقة والجديدة للحقول التي تغيّرت في بيانات المستخدم.']
+  'device-user-changes': ['التعديلات', 'القيم السابقة والجديدة للحقول التي تغيّرت في بيانات المستخدم.'],
+  'program-connections': ['ربط البرامج', 'مفتاح مستقل لكل برنامج، بصلاحية قراءة الحركات فقط.']
 };
 const deviceUserColumns = ['المستخدم', 'رقمه في الجهاز', 'الجهاز', 'القائمة', 'الشخص المرتبط', 'آخر ملاحظة'];
 const columns = {
@@ -49,6 +50,7 @@ function hasReceivedRecords() { return state.session?.capabilities?.receivedReco
 function hasDeviceUserChanges() { return hasReceivedRecords() && state.session.capabilities.deviceUserChanges === true; }
 function hasDeviceUserPunches() { return hasReceivedRecords() && state.session.capabilities.deviceUserPunches === true; }
 function allowedView(view) {
+  if (view === 'program-connections') return state.session?.capabilities?.programConnections === true;
   if (Object.hasOwn(deviceChangeKinds, view)) return !isDemo() && hasDeviceUserChanges();
   if (view === 'received-punches' || Object.hasOwn(deviceRosters, view)) return !isDemo() && hasReceivedRecords();
   return Object.hasOwn(descriptions, view);
@@ -96,6 +98,7 @@ function applyPortalMode() {
   $('addPersonForm').inert = true;
   document.querySelectorAll('[data-ingest-only]').forEach(node => { node.hidden = !hasReceivedRecords(); });
   document.querySelectorAll('[data-device-changes-only]').forEach(node => { node.hidden = !hasDeviceUserChanges(); });
+  document.querySelectorAll('[data-program-connections-only]').forEach(node => { node.hidden = !allowedView('program-connections'); });
   $('statsGrid').classList.toggle('ingest-stats', hasReceivedRecords());
   if (hasReceivedRecords()) {
     for (const [id, text] of Object.entries({
@@ -179,6 +182,10 @@ function toggleMenu(open) {
 
 function setView(view) {
   if (!allowedView(view)) return;
+  if (view !== 'program-connections') {
+    $('programConnectionSettings').value = '';
+    $('programConnectionSecret').hidden = true;
+  }
   clearTimeout(searchTimer);
   const deviceUserRowId = view === 'received-punches' ? punchIdentityFromHash() : null;
   if (deviceUserRowId !== state.deviceUserRowId && view === 'received-punches') {
@@ -200,10 +207,12 @@ function setView(view) {
     else button.removeAttribute('aria-current');
   });
   $('overviewView').hidden = view !== 'overview';
-  $('listView').hidden = view === 'overview';
+  $('listView').hidden = view === 'overview' || view === 'program-connections';
+  $('programConnectionsView').hidden = view !== 'program-connections';
+  $('readOnlyBadge').hidden = view === 'program-connections' || (state.session?.user.role === 'admin' && isDemo());
   $('punchIdentityFilter').hidden = !deviceUserRowId;
   $('addPersonButton').hidden = view !== 'people' || !canCreatePerson();
-  if (view !== 'overview') {
+  if (view !== 'overview' && view !== 'program-connections') {
     $('searchInput').value = state.searches[view];
     const searchPlaceholders = { people: 'ابحث بالاسم أو الكود…', devices: 'ابحث باسم الجهاز أو رقمه…' };
     $('searchInput').placeholder = Object.hasOwn(deviceRosters, view) || Object.hasOwn(deviceChangeKinds, view)
@@ -239,7 +248,11 @@ async function loadView({ preserveNotice = false } = {}) {
   if (!preserveNotice) $('globalNotice').hidden = true;
   setLoading(true);
   try {
-    if (view === 'overview') {
+    if (view === 'program-connections') {
+      const data = await api('/api/portal/program-connections');
+      if (request !== state.request) return;
+      renderProgramConnections(data);
+    } else if (view === 'overview') {
       const data = await api('/api/portal/overview');
       if (request !== state.request) return;
       updateCounts(data.counts || {});
@@ -260,7 +273,10 @@ async function loadView({ preserveNotice = false } = {}) {
   } catch (error) {
     if (request !== state.request || !state.session) return;
     showNotice(connectionError(error));
-    if (view !== 'overview') {
+    if (view === 'program-connections') {
+      $('programConnectionsStatus').textContent = 'تعذر تحميل مفاتيح الربط. اضغط تحديث لإعادة المحاولة.';
+      $('programConnectionsBody').replaceChildren();
+    } else if (view !== 'overview') {
       state.list = null;
       renderEmpty('تعذر تحميل البيانات', 'اضغط تحديث لإعادة المحاولة.');
       $('listTotal').textContent = 'البيانات غير متاحة حاليًا';
@@ -268,7 +284,7 @@ async function loadView({ preserveNotice = false } = {}) {
   } finally {
     if (request === state.request) {
       setLoading(false);
-      if (view !== 'overview') updatePagination(state.list?.page);
+      if (view !== 'overview' && view !== 'program-connections') updatePagination(state.list?.page);
     }
   }
 }
@@ -562,6 +578,66 @@ function updatePagination(page) {
 }
 
 function closePersonDialog() { $('addPersonDialog').close(); }
+function renderProgramConnections(data) {
+  $('programConnectionsBody').replaceChildren();
+  const items = Array.isArray(data.items) ? data.items : [];
+  $('programConnectionsStatus').textContent = items.length ? `${numbers.format(items.length)} مفتاح ربط · الصلاحية قراءة الحركات فقط` : 'لا توجد مفاتيح ربط. أضف اسم البرنامج للبدء.';
+  for (const item of items) {
+    const row = element('tr');
+    cell(row, item.programName);
+    cell(row, `${item.tokenPrefix}…`, 'code-cell');
+    cell(row, 'قراءة الحركات');
+    cell(row, item.status === 'active' ? 'مفعّل' : 'ملغى');
+    cell(row, localTime(item.createdAtUtc));
+    const action = element('td');
+    if (item.status === 'active') {
+      const revoke = element('button', 'إلغاء المفتاح', 'button button-secondary button-small');
+      revoke.type = 'button';
+      revoke.addEventListener('click', async () => {
+        if (!window.confirm(`إلغاء مفتاح ${item.programName}؟ يتوقف البرنامج عن جلب الحركات بهذا المفتاح.`)) return;
+        revoke.disabled = true;
+        try {
+          await api(`/api/portal/program-connections/${encodeURIComponent(item.id)}/revoke`, { method: 'POST', body: {} });
+          $('programConnectionSettings').value = '';
+          $('programConnectionSecret').hidden = true;
+          await loadView();
+        } catch (error) { showNotice(connectionError(error)); revoke.disabled = false; }
+      });
+      action.append(revoke);
+    } else action.textContent = '—';
+    row.append(action);
+    $('programConnectionsBody').append(row);
+  }
+}
+$('programConnectionForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!allowedView('program-connections') || $('createProgramConnection').disabled || !$('programConnectionForm').reportValidity()) return;
+  $('createProgramConnection').disabled = true;
+  $('programConnectionSettings').value = '';
+  $('programConnectionSecret').hidden = true;
+  try {
+    const data = await api('/api/portal/program-connections', { method: 'POST', body: { programName: $('programName').value.trim() } });
+    // Keep the one-time credential in this page only; never in URL or persistent browser storage.
+    if (state.view === 'program-connections') {
+      $('programConnectionEndpoint').textContent = `${data.apiUrl}/api/v1/source-punches`;
+      $('programConnectionSettings').value = [
+        'BIOMETRIC_SOURCE_IMPORT_ENABLED="true"',
+        `BIOMETRIC_SOURCE_API_URL="${data.apiUrl}"`,
+        `BIOMETRIC_SOURCE_API_TOKEN="${data.token}"`,
+        `BIOMETRIC_SOURCE_STREAM_ID="${data.streamId}"`
+      ].join('\n');
+      $('programConnectionSecret').hidden = false;
+      $('programName').value = '';
+      await loadView({ preserveNotice: true });
+    }
+  } catch (error) { showNotice(connectionError(error)); }
+  finally { $('createProgramConnection').disabled = false; }
+});
+$('copyProgramConnection').addEventListener('click', async () => {
+  const field = $('programConnectionSettings');
+  try { await navigator.clipboard.writeText(field.value); showNotice('تم نسخ إعدادات الربط.', 'success'); }
+  catch { field.focus(); field.select(); showNotice('تم تحديد الإعدادات. انسخها باستخدام Ctrl+C.'); }
+});
 function submitSearch() {
   if (state.view === 'overview') return;
   state.searches[state.view] = $('searchInput').value.trim();

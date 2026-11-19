@@ -2,6 +2,7 @@ import { portalAccountsConfig } from './portal-accounts.js';
 import { normalizeBasicMachineCredentials } from '../infrastructure/ingest/basic-machine-credentials.js';
 import { normalizeConsumerApiConfig } from '../infrastructure/integration/consumer-api-credentials.js';
 import { normalizeUserProfilePushDevices } from '../infrastructure/ingest/user-profile-push-policy.js';
+import { programConnectionsConfig } from './program-connections.js';
 
 export function loadCloudIngestConfig(env = process.env) {
   const host = env.BIOMETRIC_INGEST_HOST ?? '0.0.0.0';
@@ -53,7 +54,7 @@ export function loadCloudIngestConfig(env = process.env) {
     consumerApi = consumerApiConfig(env, token, basicCredentials?.password);
   } catch { throw invalid(); }
   return Object.freeze({ host, port: integer(env.PORT, 8080, 1, 65535), portal,
-    token, basicCredentials, consumerApi, allowedDevices: Object.freeze(allowedDevices), userProfilePushDevices,
+    token, basicCredentials, consumerApi, programConnections: programConnectionsConfig(env), allowedDevices: Object.freeze(allowedDevices), userProfilePushDevices,
     userQueryProbe: env.BIOMETRIC_INGEST_USER_QUERY_PROBE,
     userDirectoryPreview: env.BIOMETRIC_INGEST_USER_DIRECTORY_PREVIEW,
     biodataDiscardDevice,

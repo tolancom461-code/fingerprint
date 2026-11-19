@@ -15,6 +15,8 @@ const config = { host: 'database.test.invalid', port: 4000, user: 'cluster.inges
   connectTimeoutMs: 100, queryTimeoutMs: 100, transactionTimeoutMs: 1000 };
 const eligibility = { DATA_TYPE: 'tinyint', COLUMN_TYPE: 'tinyint unsigned', IS_NULLABLE: 'NO', COLUMN_DEFAULT: '0' };
 
+const programGrant = { grant: "GRANT SELECT, INSERT, UPDATE ON fingerprint.biometric_svc_program_connections TO 'writer'@'%'" };
+
 function grants({ bare = false, split = false } = {}) {
   const account = bare ? "'writer'@'%'" : '`writer`@`%`';
   const rows = [`GRANT USAGE ON *.* TO ${account}`];
@@ -84,6 +86,41 @@ test('writer privilege matrix is immutable and gives writes only to ingest-owned
   }
   assert.deepEqual(INGEST_TABLE_PRIVILEGES[BIOMETRIC_TABLES.ingestEvents], ['SELECT', 'INSERT']);
   assert.deepEqual(INGEST_TABLE_PRIVILEGES[BIOMETRIC_TABLES.eventProcessing], ['SELECT', 'INSERT', 'UPDATE']);
+});
+
+test('program credentials table grant can be staged while the disabled feature forbids its reads and writes', async () => {
+  const f = fixture({ grants: [...grants(), programGrant] });
+  const db = await createIngestDatabase(config, { createPool: f.createPool });
+  try {
+    assert.deepEqual(await db.checkReady(), { ready: true });
+    assert.equal(f.state.calls.some(call => call.sql.includes('biometric_svc_program_connections') && call.sql !== 'SHOW GRANTS FOR CURRENT_USER()'), false);
+    for (const sql of [
+      'SELECT id FROM `biometric_svc_program_connections` WHERE token_hash = ?',
+      "INSERT INTO `biometric_svc_program_connections` (id) VALUES (?)",
+      "UPDATE `biometric_svc_program_connections` SET status = 'revoked' WHERE id = ?",
+    ]) await assert.rejects(() => db.execute(sql, ['synthetic']), { code: 'INGEST_DATABASE_QUERY_REJECTED' });
+  } finally { await db.end(); }
+});
+
+test('enabled program credentials require exact table privileges and admit bounded metadata and parameterized operations', async () => {
+  for (const grant of [null, { grant: "GRANT SELECT, INSERT ON fingerprint.biometric_svc_program_connections TO 'writer'@'%'" },
+    { grant: "GRANT SELECT, INSERT, UPDATE, DELETE ON fingerprint.biometric_svc_program_connections TO 'writer'@'%'" }]) {
+    const f = fixture({ grants: [...grants(), ...(grant ? [grant] : [])] });
+    await assert.rejects(() => createIngestDatabase({ ...config, programConnectionsEnabled: true }, { createPool: f.createPool }),
+      { code: 'INGEST_DATABASE_GRANTS_REJECTED' });
+  }
+  const f = fixture({ grants: [...grants(), programGrant] });
+  const db = await createIngestDatabase({ ...config, programConnectionsEnabled: true }, { createPool: f.createPool });
+  try {
+    await db.execute('SELECT ENGINE, TABLE_TYPE FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?', ['biometric_svc_program_connections']);
+    await db.execute("SELECT id, DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%s.%fZ') AS created_at_utc FROM `biometric_svc_program_connections` WHERE token_hash = ? AND status = 'active' LIMIT 1", ['a'.repeat(64)]);
+    await db.execute("INSERT INTO `biometric_svc_program_connections` (id, token_hash, created_at) VALUES (?, ?, UTC_TIMESTAMP(6))", ['synthetic-id', 'a'.repeat(64)]);
+    await db.execute("UPDATE `biometric_svc_program_connections` SET status = 'revoked', revoked_at = UTC_TIMESTAMP(6), revoked_by = ? WHERE id = ? AND status = 'active'", ['admin', 'synthetic-id']);
+    for (const sql of ['DELETE FROM `biometric_svc_program_connections` WHERE id = ?', 'SELECT * FROM test.biometric_svc_program_connections',
+      'UPDATE biometric_svc_people SET display_name = ? WHERE id = ?']) {
+      await assert.rejects(() => db.execute(sql, ['synthetic', '1']), { code: 'INGEST_DATABASE_QUERY_REJECTED' });
+    }
+  } finally { await db.end(); }
 });
 
 test('startup validates identity, exact grants, schema and eligibility before exposing a narrow frozen pool', async () => {

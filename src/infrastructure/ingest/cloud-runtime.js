@@ -29,6 +29,12 @@ import { normalizeBasicMachineCredentials } from './basic-machine-credentials.js
 import { normalizeUserProfilePushDevices } from './user-profile-push-policy.js';
 import { createFinalEventsApiHandler } from '../integration/final-events-api-server.js';
 import { normalizeConsumerApiConfig } from '../integration/consumer-api-credentials.js';
+import { programConnectionsConfig } from '../../config/program-connections.js';
+import { ProgramConnectionsService } from '../../application/program-connections-service.js';
+import { TiDbProgramConnectionsStore } from '../storage/tidb-program-connections-store.js';
+import { SourcePunchesService } from '../../application/source-punches-service.js';
+import { TiDbSourcePunchesReadStore } from '../storage/tidb-source-punches-read-store.js';
+import { createSourcePunchesApiHandler } from '../integration/source-punches-api-server.js';
 
 const defaultLog = Object.freeze({ async write(entry) { process.stdout.write(JSON.stringify(entry) + '\n'); } });
 const LOG_TYPES = new Set([
@@ -61,9 +67,14 @@ export async function startCloudIngest({ config, openDatabase = createIngestData
   const log = sanitizedLog(diagnosticLog);
   try {
     const { basicCredentials, consumerApi, userProfilePushDevices } = validateRuntimeConfig(config);
+    const programsConfig = config.programConnections == null ? null : programConnectionsConfig({
+      BIOMETRIC_INGEST_PROGRAM_CONNECTIONS_ENABLED: 'true', BIOMETRIC_INGEST_SOURCE_STREAM_ID: config.programConnections.streamId
+    });
     const userQueryProbe = createUserQueryProbe(config.userQueryProbe, config.allowedDevices, config.userDirectoryPreview);
     const directorySyncEnabled = config.directorySyncMode === 'active';
-    database = await openDatabase(directorySyncEnabled ? { ...config.database, directorySyncEnabled } : config.database);
+    let databaseConfig = directorySyncEnabled ? { ...config.database, directorySyncEnabled } : config.database;
+    if (programsConfig) databaseConfig = { ...databaseConfig, programConnectionsEnabled: true };
+    database = await openDatabase(databaseConfig);
     const databaseReady = await database.checkReady();
     const deviceUserIdentityEnabled = databaseReady?.deviceUserIdentityEnabled === true;
     if (directorySyncEnabled && !deviceUserIdentityEnabled) throw new Error('Directory sync requires the identity schema');
@@ -91,9 +102,15 @@ export async function startCloudIngest({ config, openDatabase = createIngestData
     const registry = createAuthenticatedRegistry({ registry: new VendorAdapterRegistry([adapter]), token: config.token,
       basicCredentials, diagnosticLog: log,
       rejectedRequestObserver: req => connectionDiagnostics.recordRejectedRequest(req) });
+    const connections = programsConfig ? new ProgramConnectionsService({ store: new TiDbProgramConnectionsStore(database) }) : null;
+    if (connections) await connections.assertReady();
+    const sourceHandler = connections ? createSourcePunchesApiHandler({ connections,
+      service: new SourcePunchesService({ readStore: new TiDbSourcePunchesReadStore(database, { deviceUserIdentityEnabled }),
+        streamId: programsConfig.streamId }) }) : null;
     const portal = createCloudIngestPortalHandler({ config: config.portal, readStore: new TiDbIngestReadStore(database,
       { deviceUserIdentityEnabled, directorySyncEnabled }),
-      connectionDiagnostics, deviceDirectoryPreview: userQueryProbe?.directorySnapshot });
+      connectionDiagnostics, deviceDirectoryPreview: userQueryProbe?.directorySnapshot,
+      programConnections: connections ? { service: connections, streamId: programsConfig.streamId } : null });
     const consumerHandler = consumerApi ? createFinalEventsApiHandler({
       service: new FinalEventsReadService({ readStore: new TiDbFinalEventsReadStore(database) }),
       personDirectoryService: new PersonDirectoryReadService({ readStore: new TiDbPersonDirectoryReadStore(database) }),
@@ -112,6 +129,7 @@ export async function startCloudIngest({ config, openDatabase = createIngestData
           res.end(body);
           return true;
         }
+        if (sourceHandler && await sourceHandler(req, res, url)) return true;
         if (consumerHandler && await consumerHandler(req, res, url)) return true;
         return portal(req, res);
       } });

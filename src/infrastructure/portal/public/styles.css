@@ -60,6 +60,11 @@
 .device-user-punch-panel td { height: 36px; padding: 8px 13px; }
 .device-user-punch-status:not(:empty) { margin-top: 8px; color: #52617a; }
 .device-user-punch-panel > button { margin-top: 10px; }
+.program-connections-panel { padding: 24px; }
+.program-connection-form { display: flex; flex-wrap: wrap; gap: 16px; align-items: end; margin-block: 24px; }
+.program-connection-form .field { flex: 1; min-width: 180px; max-width: 420px; }
+.connection-settings { display: block; width: 100%; padding: 14px; margin-block: 12px; border: 1px solid #cdd6e8; border-radius: 8px; background: #fff; color: #18304d; font: 12px/1.8 monospace; resize: vertical; overflow-wrap: anywhere; }
+.program-connections-panel .notice { margin-block: 20px; }
 @media (max-width: 700px) {
   .device-user-punch-panel { max-width: min(100%, calc(100vw - 60px)); white-space: normal; }
   .device-user-punch-panel table { white-space: normal; }

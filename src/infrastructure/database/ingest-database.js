@@ -12,6 +12,8 @@ export const INGEST_TABLE_PRIVILEGES = Object.freeze(Object.fromEntries(Object.v
   .map(table => [table, Object.freeze(['SELECT', ...(WRITES.get(table) ?? [])])])));
 
 const METADATA_TABLES = new Set(['COLUMNS', 'TABLES', 'STATISTICS']);
+const PROGRAM_CONNECTIONS_TABLE = 'biometric_svc_program_connections';
+const PROGRAM_CONNECTIONS_PRIVILEGES = Object.freeze(['SELECT', 'INSERT', 'UPDATE']);
 const DEVICE_ROW_LOCK = 'SELECT id FROM `biometric_svc_devices` WHERE id = ? FOR UPDATE';
 const DEVICE_IDENTITIES_LOCK = /^SELECT id, status, identity_started_at, identity_ended_at\s+FROM `biometric_svc_device_users` WHERE device_id = \? AND device_user_id = \? ORDER BY id FOR UPDATE$/;
 const DIRECTORY_LOCKS = new Set([
@@ -124,7 +126,7 @@ export async function createIngestDatabase(config, { createPool = mysql.createPo
             }
           } else if (directoryAudit) {
             if (!transaction || !validDirectoryAuditParams(params)) throw safe('INGEST_DATABASE_QUERY_REJECTED');
-          } else assertStatement(sql, params);
+          } else assertStatement(sql, params, settings.programConnectionsEnabled);
         } catch (error) { return Promise.reject(error); }
         return controller.executeTrusted(sql, params);
       },
@@ -192,7 +194,7 @@ export async function createIngestDatabase(config, { createPool = mysql.createPo
         throw safe('INGEST_DATABASE_GRANTS_REJECTED');
       }
       const [grants] = await execute('SHOW GRANTS FOR CURRENT_USER()', [], true);
-      assertGrants(grants, settings.directorySyncEnabled);
+      assertGrants(grants, settings.directorySyncEnabled, settings.programConnectionsEnabled);
       let schema;
       try { schema = await assertBiometricDatabaseReady({ execute }, 'fingerprint'); }
       catch (error) { if (known(error)) throw error; throw safe('INGEST_DATABASE_SCHEMA_REJECTED'); }
@@ -235,7 +237,7 @@ export async function createIngestDatabase(config, { createPool = mysql.createPo
   catch (error) { await end().catch(() => {}); throw known(error) ? error : safe('INGEST_DATABASE_UNAVAILABLE'); }
   return Object.freeze({
     async execute(sql, params = []) {
-      assertStatement(sql, params);
+      assertStatement(sql, params, settings.programConnectionsEnabled);
       const lease = await acquire();
       try { return await lease.exposed.execute(sql, params); } finally { lease.exposed.release(); }
     },
@@ -245,7 +247,7 @@ export async function createIngestDatabase(config, { createPool = mysql.createPo
   });
 }
 
-function assertGrants(rows, directorySyncEnabled) {
+function assertGrants(rows, directorySyncEnabled, programConnectionsEnabled) {
   if (!Array.isArray(rows) || !rows.length || rows.length > 100) throw safe('INGEST_DATABASE_GRANTS_REJECTED');
   const seen = new Map();
   for (const row of rows) {
@@ -256,8 +258,8 @@ function assertGrants(rows, directorySyncEnabled) {
     const match = TABLE_GRANT.exec(text);
     const database = match?.[2] ?? match?.[3];
     const table = match?.[4] ?? match?.[5];
-    if (!match || database !== 'fingerprint' || !Object.hasOwn(INGEST_TABLE_PRIVILEGES, table)) throw safe('INGEST_DATABASE_GRANTS_REJECTED');
-    const allowed = INGEST_TABLE_PRIVILEGES[table];
+    if (!match || database !== 'fingerprint' || (!Object.hasOwn(INGEST_TABLE_PRIVILEGES, table) && table !== PROGRAM_CONNECTIONS_TABLE)) throw safe('INGEST_DATABASE_GRANTS_REJECTED');
+    const allowed = table === PROGRAM_CONNECTIONS_TABLE ? PROGRAM_CONNECTIONS_PRIVILEGES : INGEST_TABLE_PRIVILEGES[table];
     for (const privilege of match[1].split(',').map(item => item.trim().toUpperCase())) {
       if (!allowed.includes(privilege) && !(table === BIOMETRIC_TABLES.auditLog && privilege === 'INSERT')) {
         throw safe('INGEST_DATABASE_GRANTS_REJECTED');
@@ -272,6 +274,9 @@ function assertGrants(rows, directorySyncEnabled) {
         (table === BIOMETRIC_TABLES.auditLog && directorySyncEnabled && !allowed?.has('INSERT'))) {
       throw safe('INGEST_DATABASE_GRANTS_REJECTED');
     }
+  }
+  if (programConnectionsEnabled && PROGRAM_CONNECTIONS_PRIVILEGES.some(privilege => !seen.get(PROGRAM_CONNECTIONS_TABLE)?.has(privilege))) {
+    throw safe('INGEST_DATABASE_GRANTS_REJECTED');
   }
 }
 
@@ -290,7 +295,7 @@ function positiveId(id) {
   return (typeof id === 'string' || Number.isSafeInteger(id)) && /^[1-9]\d{0,19}$/.test(String(id));
 }
 
-function assertStatement(sql, params) {
+function assertStatement(sql, params, programConnectionsEnabled = false) {
   if (typeof sql !== 'string' || !sql.trim() || sql.length > 100_000 || !Array.isArray(params)) throw safe('INGEST_DATABASE_QUERY_REJECTED');
   const tokens = tokenize(sql);
   const command = word(tokens[0]);
@@ -307,7 +312,8 @@ function assertStatement(sql, params) {
     if (!table || tokens[index + (qualified ? 3 : 1)]?.value === '.') throw safe('INGEST_DATABASE_QUERY_REJECTED');
     if (database?.toLowerCase() === 'information_schema') {
       if (privilege !== 'SELECT' || !METADATA_TABLES.has(table.toUpperCase())) throw safe('INGEST_DATABASE_QUERY_REJECTED');
-    } else if ((database !== null && database !== 'fingerprint') || !INGEST_TABLE_PRIVILEGES[table]?.includes(privilege)) {
+    } else if ((database !== null && database !== 'fingerprint') ||
+        !(table === PROGRAM_CONNECTIONS_TABLE && programConnectionsEnabled ? PROGRAM_CONNECTIONS_PRIVILEGES : INGEST_TABLE_PRIVILEGES[table])?.includes(privilege)) {
       throw safe('INGEST_DATABASE_QUERY_REJECTED');
     }
     if (qualified) qualifiedDots.add(index + 1);
@@ -398,12 +404,14 @@ function settingsFor(config) {
       typeof config.user !== 'string' || !config.user.trim() || config.user !== config.user.trim() ||
       /(?:^|\.)root$/i.test(config.user) || typeof config.password !== 'string' || !config.password ||
       (config.directorySyncEnabled !== undefined && typeof config.directorySyncEnabled !== 'boolean') ||
+      (config.programConnectionsEnabled !== undefined && typeof config.programConnectionsEnabled !== 'boolean') ||
       !['required', 'disabled'].includes(config.sslMode) ||
       (config.sslMode === 'disabled' && !['localhost', '127.0.0.1', '::1', '[::1]'].includes(config.host))) {
     throw safe('INGEST_DATABASE_CONFIG_INVALID');
   }
   return { host: config.host, user: config.user, password: config.password, sslMode: config.sslMode,
     directorySyncEnabled: config.directorySyncEnabled === true,
+    programConnectionsEnabled: config.programConnectionsEnabled === true,
     port: integer(config.port, 4000, 65535), connectionLimit: integer(config.connectionLimit, 5, 5),
     connectTimeoutMs: integer(config.connectTimeoutMs, 4000, 30000), queryTimeoutMs: integer(config.queryTimeoutMs, 5000, 30000),
     transactionTimeoutMs: integer(config.transactionTimeoutMs, 30000, 60000) };

@@ -26,22 +26,23 @@ export function createReadOnlyPortalHandler({ config, readStore }) {
   return createPortalHandler({ config, service: createReadOnlyPortalService({ readStore }), mode: 'database-readonly' });
 }
 
-export function createCloudIngestPortalHandler({ config, readStore, connectionDiagnostics = null, deviceDirectoryPreview = null }) {
+export function createCloudIngestPortalHandler({ config, readStore, connectionDiagnostics = null, deviceDirectoryPreview = null, programConnections = null }) {
   const ingestCapabilities = {
     ...(readStore?.deviceUserIdentityEnabled === true ? { deviceUserPunches: true } : {}),
     ...(readStore?.directorySyncEnabled === true ? { deviceUserChanges: true } : {})
   };
   return createPortalHandler({ config, service: createIngestPortalService({ readStore }), mode: 'database-ingest',
-    connectionDiagnostics, deviceDirectoryPreview, ingestCapabilities });
+    connectionDiagnostics, deviceDirectoryPreview, ingestCapabilities, programConnections });
 }
 
-function createPortalHandler({ config, service, mode, connectionDiagnostics = null, deviceDirectoryPreview = null, ingestCapabilities = {} }) {
+function createPortalHandler({ config, service, mode, connectionDiagnostics = null, deviceDirectoryPreview = null, ingestCapabilities = {}, programConnections = null }) {
   const auth = createPortalAuth(config);
   const expectedHost = new URL(config.origin).host.toLowerCase();
   const secure = config.origin.startsWith('https:');
   const sessionPayload = session => ({ ...session, mode,
     capabilities: { createPerson: mode === 'demo' && session.user.role === 'admin',
-      ...(mode === 'database-ingest' ? { receivedRecords: true, ...ingestCapabilities } : {}) } });
+      ...(mode === 'database-ingest' ? { receivedRecords: true, ...ingestCapabilities,
+        ...(programConnections && session.user.role === 'admin' ? { programConnections: true } : {}) } : {}) } });
 
   return async function portalHandler(req, res) {
     const url = new URL(req.url || '/', config.origin);
@@ -88,6 +89,31 @@ function createPortalHandler({ config, service, mode, connectionDiagnostics = nu
       }
       if (pathname.startsWith('/api/portal/')) {
         requireSession(session);
+        if (programConnections && (pathname === '/api/portal/program-connections' || pathname.startsWith('/api/portal/program-connections/'))) {
+          if (session.user.role !== 'admin') throw coded('FORBIDDEN', 'إدارة ربط البرامج متاحة للمدير فقط', 403);
+          if (req.method === 'GET' && pathname === '/api/portal/program-connections') {
+            json(res, 200, { ...await programConnections.service.list(), streamId: programConnections.streamId,
+              apiUrl: config.origin, endpoint: '/api/v1/source-punches', permission: 'source-punches:read' });
+            return true;
+          }
+          if (req.method === 'POST') {
+            auth.requireWrite(req, session);
+            const body = await readJson(req);
+            if (pathname === '/api/portal/program-connections') {
+              if (Object.keys(body).length !== 1 || !Object.hasOwn(body, 'programName')) throw coded('INVALID_INPUT', 'اسم البرنامج مطلوب', 400);
+              json(res, 201, { ...await programConnections.service.create({ programName: body.programName, actor: session.user.username }),
+                apiUrl: config.origin, streamId: programConnections.streamId });
+              return true;
+            }
+            const match = /^\/api\/portal\/program-connections\/([0-9a-f-]{36})\/revoke$/.exec(pathname);
+            if (match && Object.keys(body).length === 0) {
+              json(res, 200, await programConnections.service.revoke({ id: match[1], actor: session.user.username }));
+              return true;
+            }
+          }
+          json(res, 404, { error: 'NOT_FOUND', message: 'المسار غير موجود' });
+          return true;
+        }
         const filters = Object.fromEntries(['search', 'page', 'limit'].map(key => [key, url.searchParams.get(key) ?? undefined]));
         if (req.method === 'GET') {
           if (deviceDirectoryPreview && pathname === '/api/portal/device-directory-preview') {
