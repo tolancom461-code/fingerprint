@@ -140,5 +140,6 @@ test('disabled program feature exposes neither management capabilities nor progr
   const response = await fetch(lab.base + '/api/portal/program-connections', { headers: { Cookie: admin.cookie } });
   assert.equal(response.status, 404); await response.text();
   assert.equal((await fetch(lab.base + '/api/v1/source-punches')).status, 404);
+  assert.equal((await fetch(lab.base + '/api/v1/device-identities')).status, 404);
   assert.equal(lab.state.rows.length, 0);
 });

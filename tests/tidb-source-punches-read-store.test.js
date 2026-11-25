@@ -15,7 +15,7 @@ test('source query uses canonical punches independent of final events, people an
   await store.listSourcePunchesAfter('18446744073709551614', 100);
   const { sql, params } = calls[0];
   assert.match(sql, /FROM `biometric_svc_punches` p/);
-  assert.match(sql, /p\.id > CAST\(\? AS UNSIGNED\)/);
+  assert.match(sql, /p\.id > CAST\(\? AS DECIMAL\(20,0\)\)/);
   assert.match(sql, /ORDER BY p\.id ASC\s+LIMIT 101/);
   assert.match(sql, /CAST\(p\.id AS CHAR\) AS id/);
   assert.match(sql, /CAST\(p\.device_user_row_id AS CHAR\) AS device_user_row_id/);

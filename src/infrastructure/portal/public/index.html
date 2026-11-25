@@ -63,7 +63,7 @@
       </section>
       <section id="programConnectionsView" class="view panel program-connections-panel" aria-label="ربط البرامج" hidden>
         <h2>ربط برنامج جديد</h2>
-        <p class="muted">أدخل اسم البرنامج لتوليد مفتاح مستقل لقراءة الحركات الست المحفوظة في برنامج البصمة.</p>
+        <p class="muted">أدخل اسم البرنامج لتوليد مفتاح مستقل لقراءة الحركات الست ودليل هويات مستخدمي الأجهزة، بما يشمل التسجيلات التاريخية.</p>
         <form id="programConnectionForm" class="program-connection-form">
           <div class="field"><label for="programName">اسم البرنامج</label><input id="programName" maxlength="100" placeholder="TolanHR" autocomplete="off" required></div>
           <button id="createProgramConnection" class="button button-primary" type="submit">توليد مفتاح الربط</button>
@@ -71,6 +71,7 @@
         <div id="programConnectionSecret" class="notice" hidden>
           <strong>احفظ إعدادات الربط الآن؛ يظهر المفتاح كاملًا هذه المرة فقط.</strong>
           <p>رابط قراءة الحركات لأي برنامج: <bdi id="programConnectionEndpoint"></bdi></p>
+          <p>رابط دليل هويات الأجهزة بالمفتاح نفسه: <bdi id="programConnectionDirectoryEndpoint"></bdi></p>
           <p>يُرسل المفتاح في ترويسة Authorization بصيغة Bearer. إعدادات TolanHR الجاهزة أدناه تعمل بعد نشر كود المستورد.</p>
           <label for="programConnectionSettings">إعدادات TolanHR الجاهزة</label>
           <textarea id="programConnectionSettings" class="connection-settings" dir="ltr" readonly rows="5" autocomplete="off" spellcheck="false"></textarea>

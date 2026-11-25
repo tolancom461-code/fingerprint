@@ -58,7 +58,7 @@ test('each program authenticates independently; revocation is immediate and repe
   const { service, authReads } = fixture();
   const first = await service.create({ programName: 'First program', actor: 'admin' });
   const second = await service.create({ programName: 'Second program', actor: 'admin' });
-  assert.equal((await service.authenticate(first.token)).scope, 'punches:read');
+  assert.equal((await service.authenticate(first.token)).scope, 'punches-and-directory:read');
   assert.equal((await service.authenticate(first.token)).id, first.connection.id);
   const revoked = await service.revoke({ id: first.connection.id, actor: 'operator-1' });
   assert.equal(revoked.connection.revokedBy, 'operator-1');

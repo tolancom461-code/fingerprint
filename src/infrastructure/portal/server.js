@@ -93,7 +93,8 @@ function createPortalHandler({ config, service, mode, connectionDiagnostics = nu
           if (session.user.role !== 'admin') throw coded('FORBIDDEN', 'إدارة ربط البرامج متاحة للمدير فقط', 403);
           if (req.method === 'GET' && pathname === '/api/portal/program-connections') {
             json(res, 200, { ...await programConnections.service.list(), streamId: programConnections.streamId,
-              apiUrl: config.origin, endpoint: '/api/v1/source-punches', permission: 'source-punches:read' });
+              apiUrl: config.origin, endpoint: '/api/v1/source-punches', directoryEndpoint: '/api/v1/device-identities',
+              permission: 'punches-and-directory:read' });
             return true;
           }
           if (req.method === 'POST') {

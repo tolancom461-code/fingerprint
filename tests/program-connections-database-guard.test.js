@@ -4,6 +4,7 @@ import { createIngestDatabase, INGEST_TABLE_PRIVILEGES } from '../src/infrastruc
 import { BIOMETRIC_TABLES, REQUIRED_BIOMETRIC_COLUMNS, REQUIRED_BIOMETRIC_UNIQUE_INDEXES } from '../src/infrastructure/storage/biometric-table-names.js';
 import { TiDbProgramConnectionsStore } from '../src/infrastructure/storage/tidb-program-connections-store.js';
 import { TiDbSourcePunchesReadStore } from '../src/infrastructure/storage/tidb-source-punches-read-store.js';
+import { TiDbDeviceIdentitiesReadStore } from '../src/infrastructure/storage/tidb-device-identities-read-store.js';
 
 const table = 'biometric_svc_program_connections';
 const config = { host: 'fixture.invalid', user: 'synthetic_writer', password: 'fixture-only-password',
@@ -86,6 +87,7 @@ test('guard accepts the real program store metadata/read/write SQL only under ex
     await store.revoke({ id: saved.id, actor: 'fixture-admin' });
     assert.equal(await store.findActiveByTokenHash('a'.repeat(64)), null);
     await new TiDbSourcePunchesReadStore(db).listSourcePunchesAfter('18446744073709551614', 100);
+    await new TiDbDeviceIdentitiesReadStore(db, { deviceUserIdentityEnabled: true }).listDeviceIdentitiesAfter('0', 100);
     assert.equal(fixtureDb.state.calls.some(call => call.sql.includes('COALESCE(p.punch_state')), true);
   } finally { await db.end(); }
 });

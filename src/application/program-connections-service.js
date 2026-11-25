@@ -50,7 +50,7 @@ export class ProgramConnectionsService {
     // No authentication cache: revocation is checked on every request.
     const connection = await run(() => this.store.findActiveByTokenHash(digest(token)));
     return connection && connection.status === 'active'
-      ? { id: connection.id, programName: connection.programName, scope: 'punches:read' } : null;
+      ? { id: connection.id, programName: connection.programName, scope: 'punches-and-directory:read' } : null;
   }
 }
 

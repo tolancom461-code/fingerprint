@@ -7,6 +7,8 @@ import { createLocalIngestMysqlLab } from '../scripts/lib/local-mysql-ingest-lab
 import { SourcePunchesService } from '../src/application/source-punches-service.js';
 import { TiDbSourcePunchesReadStore } from '../src/infrastructure/storage/tidb-source-punches-read-store.js';
 import { TiDbProgramConnectionsStore } from '../src/infrastructure/storage/tidb-program-connections-store.js';
+import { DeviceIdentitiesService } from '../src/application/device-identities-service.js';
+import { TiDbDeviceIdentitiesReadStore } from '../src/infrastructure/storage/tidb-device-identities-read-store.js';
 
 const available = process.platform === 'win32'
   && await fs.access('C:/Program Files/MySQL/MySQL Server 8.4/bin/mysqld.exe').then(() => true, () => false);
@@ -59,6 +61,10 @@ test('owned MySQL source stream preserves identity/precision and paginates throu
     assert.equal(items[0].eventTimeUtc, '2026-11-19T07:08:09.123456Z');
     assert.equal(items.at(-1).eventTimeUtc, '2026-11-19T07:08:09.000001Z');
     assert.equal(cursor, '18446744073709551615');
+    const exhaustedPunches = await service.list({ afterId: cursor });
+    assert.deepEqual(exhaustedPunches.items, []);
+    assert.equal(exhaustedPunches.nextCursor, cursor);
+    assert.equal(exhaustedPunches.hasMore, false);
     const first = await service.list({ limit: 2 });
     assert.deepEqual(await service.list({ limit: 2 }), first);
     const legacy = new SourcePunchesService({ streamId: first.streamId, readStore: new TiDbSourcePunchesReadStore(pool) });
@@ -77,6 +83,52 @@ test('owned MySQL source stream preserves identity/precision and paginates throu
     assert.equal((await programStore.findActiveByTokenHash('a'.repeat(64))).id, connection.id);
     await programStore.revoke({ id: connection.id, actor: 'fixture-admin' });
     assert.equal(await programStore.findActiveByTokenHash('a'.repeat(64)), null);
+    // Minimal versioned identity tables exist only in this newly owned fixture.
+    await lab.sql(`CREATE TABLE biometric_svc_devices (
+      id BIGINT UNSIGNED PRIMARY KEY, display_name VARCHAR(255) NULL, serial_number VARCHAR(128) NOT NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin`);
+    await lab.sql(`CREATE TABLE biometric_svc_device_users (
+      id BIGINT UNSIGNED PRIMARY KEY, device_id BIGINT UNSIGNED NOT NULL,
+      device_user_id VARCHAR(128) NOT NULL, display_name VARCHAR(255) NULL, status VARCHAR(32) NOT NULL,
+      first_seen_at DATETIME(6) NULL, last_seen_at DATETIME(6) NULL,
+      identity_started_at DATETIME(6) NULL, identity_ended_at DATETIME(6) NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin`);
+    await lab.sql('INSERT INTO biometric_svc_devices (id, display_name, serial_number) VALUES (?,NULL,?)',
+      ['9007199254740999', 'SYNTHETIC-001']);
+    for (const [id, name, status, firstSeen, started] of [
+      ['9007199254740993', null, 'absent_from_device', null, null],
+      ['18446744073709551614', 'اسم حالي', 'active', '2026-11-19 07:08:09.123456', '2026-11-19 06:00:00.000001'],
+      ['18446744073709551615', 'اسم آخر', 'seen', null, null],
+    ]) await lab.sql(`INSERT INTO biometric_svc_device_users
+      (id,device_id,device_user_id,display_name,status,first_seen_at,last_seen_at,identity_started_at,identity_ended_at)
+      VALUES (?,?,?,?,?,?,NULL,?,NULL)`, [id, '9007199254740999', '60001', name, status, firstSeen, started]);
+    const directory = new DeviceIdentitiesService({ streamId: first.streamId,
+      readStore: new TiDbDeviceIdentitiesReadStore(pool, { deviceUserIdentityEnabled: true }) });
+    const directoryFirst = await directory.list({ afterId: '0', limit: 1 });
+    assert.equal(directoryFirst.items[0].identityId, '9007199254740993');
+    assert.equal(directoryFirst.items[0].status, 'historical');
+    assert.equal(directoryFirst.items[0].displayName, null);
+    assert.equal(directoryFirst.items[0].identityStartedAtUtc, null);
+    assert.equal(directoryFirst.items[0].identityEndedAtUtc, null);
+    assert.equal(directoryFirst.items[0].deviceName, 'SYNTHETIC-001');
+    assert.equal(directoryFirst.hasMore, true);
+    const directoryRest = await directory.list({ afterId: directoryFirst.nextCursor, limit: 2 });
+    assert.deepEqual(directoryRest.items.map(item => item.identityId), ['18446744073709551614', '18446744073709551615']);
+    assert.equal(directoryRest.items[0].firstSeenAtUtc, '2026-11-19T07:08:09.123456Z');
+    assert.equal(directoryRest.items[0].identityStartedAtUtc, '2026-11-19T06:00:00.000001Z');
+    assert.equal(directoryRest.hasMore, false);
+    await lab.sql(`UPDATE biometric_svc_device_users SET display_name = ?, status = 'absent_from_device',
+      identity_ended_at = ? WHERE id = ?`, ['اسم محدث', '2026-11-19 08:00:00.000001', '18446744073709551614']);
+    const directoryRefresh = await directory.list({ afterId: '0', limit: 3 });
+    assert.equal(directoryRefresh.items[1].displayName, 'اسم محدث');
+    assert.equal(directoryRefresh.items[1].status, 'historical');
+    assert.equal(directoryRefresh.items[1].identityEndedAtUtc, '2026-11-19T08:00:00.000001Z');
+    const [[castCursor]] = await lab.sql('SELECT CAST(? AS DECIMAL(20,0)) AS decimal_cursor', [directoryRest.nextCursor]);
+    assert.equal(String(castCursor.decimal_cursor), directoryRest.nextCursor, 'Decimal SQL cursor retains all digits');
+    const afterLastIdentity = await new TiDbDeviceIdentitiesReadStore(pool, { deviceUserIdentityEnabled: true })
+      .listDeviceIdentitiesAfter(directoryRest.nextCursor, 100);
+    assert.deepEqual(afterLastIdentity.map(row => row.id), [], 'No identity follows the largest unsigned cursor');
+    assert.equal((await directory.list({ afterId: directoryRest.nextCursor })).items.length, 0);
   } finally {
     const cleanup = await lab.close();
     assert.equal(cleanup.mysqlStopped, true);

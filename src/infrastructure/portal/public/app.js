@@ -17,7 +17,7 @@ const databaseDescriptions = {
   'historical-device-users': ['المستخدمون التاريخيون', 'هويات محفوظة لحركاتها السابقة وروابطها بالأشخاص.'],
   'new-device-users': ['المستخدمون الجدد', 'المستخدمون الذين سجّل النظام إضافتهم إلى دليل الجهاز.'],
   'device-user-changes': ['التعديلات', 'القيم السابقة والجديدة للحقول التي تغيّرت في بيانات المستخدم.'],
-  'program-connections': ['ربط البرامج', 'مفتاح مستقل لكل برنامج، بصلاحية قراءة الحركات فقط.']
+  'program-connections': ['ربط البرامج', 'مفتاح مستقل لكل برنامج لقراءة الحركات ودليل هويات مستخدمي الأجهزة فقط.']
 };
 const deviceUserColumns = ['المستخدم', 'رقمه في الجهاز', 'الجهاز', 'القائمة', 'الشخص المرتبط', 'آخر ملاحظة'];
 const columns = {
@@ -581,12 +581,12 @@ function closePersonDialog() { $('addPersonDialog').close(); }
 function renderProgramConnections(data) {
   $('programConnectionsBody').replaceChildren();
   const items = Array.isArray(data.items) ? data.items : [];
-  $('programConnectionsStatus').textContent = items.length ? `${numbers.format(items.length)} مفتاح ربط · الصلاحية قراءة الحركات فقط` : 'لا توجد مفاتيح ربط. أضف اسم البرنامج للبدء.';
+  $('programConnectionsStatus').textContent = items.length ? `${numbers.format(items.length)} مفتاح ربط · قراءة الحركات ودليل الهويات فقط` : 'لا توجد مفاتيح ربط. أضف اسم البرنامج للبدء.';
   for (const item of items) {
     const row = element('tr');
     cell(row, item.programName);
     cell(row, `${item.tokenPrefix}…`, 'code-cell');
-    cell(row, 'قراءة الحركات');
+    cell(row, 'قراءة الحركات ودليل الهويات');
     cell(row, item.status === 'active' ? 'مفعّل' : 'ملغى');
     cell(row, localTime(item.createdAtUtc));
     const action = element('td');
@@ -594,7 +594,7 @@ function renderProgramConnections(data) {
       const revoke = element('button', 'إلغاء المفتاح', 'button button-secondary button-small');
       revoke.type = 'button';
       revoke.addEventListener('click', async () => {
-        if (!window.confirm(`إلغاء مفتاح ${item.programName}؟ يتوقف البرنامج عن جلب الحركات بهذا المفتاح.`)) return;
+        if (!window.confirm(`إلغاء مفتاح ${item.programName}؟ يتوقف البرنامج عن جلب الحركات ودليل الهويات بهذا المفتاح.`)) return;
         revoke.disabled = true;
         try {
           await api(`/api/portal/program-connections/${encodeURIComponent(item.id)}/revoke`, { method: 'POST', body: {} });
@@ -620,6 +620,7 @@ $('programConnectionForm').addEventListener('submit', async event => {
     // Keep the one-time credential in this page only; never in URL or persistent browser storage.
     if (state.view === 'program-connections') {
       $('programConnectionEndpoint').textContent = `${data.apiUrl}/api/v1/source-punches`;
+      $('programConnectionDirectoryEndpoint').textContent = `${data.apiUrl}/api/v1/device-identities`;
       $('programConnectionSettings').value = [
         'BIOMETRIC_SOURCE_IMPORT_ENABLED="true"',
         `BIOMETRIC_SOURCE_API_URL="${data.apiUrl}"`,

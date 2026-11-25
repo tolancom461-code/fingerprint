@@ -32,7 +32,7 @@ export class TiDbSourcePunchesReadStore {
               COALESCE(p.punch_state, ${RAW_STATE}) AS punch_state, p.raw_status,
               DATE_FORMAT(p.device_event_time_utc, '%Y-%m-%dT%H:%i:%s.%fZ') AS device_event_time_utc
          FROM \`${BIOMETRIC_TABLES.punches}\` p
-        WHERE p.id > CAST(? AS UNSIGNED)
+        WHERE p.id > CAST(? AS DECIMAL(20,0))
           AND p.raw_status IN ('0', '1', '2', '3', '4', '5')
           AND p.device_event_time_utc IS NOT NULL
           AND (p.punch_state = ${RAW_STATE} OR ${historical})

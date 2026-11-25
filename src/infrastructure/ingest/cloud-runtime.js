@@ -34,6 +34,8 @@ import { ProgramConnectionsService } from '../../application/program-connections
 import { TiDbProgramConnectionsStore } from '../storage/tidb-program-connections-store.js';
 import { SourcePunchesService } from '../../application/source-punches-service.js';
 import { TiDbSourcePunchesReadStore } from '../storage/tidb-source-punches-read-store.js';
+import { DeviceIdentitiesService } from '../../application/device-identities-service.js';
+import { TiDbDeviceIdentitiesReadStore } from '../storage/tidb-device-identities-read-store.js';
 import { createSourcePunchesApiHandler } from '../integration/source-punches-api-server.js';
 
 const defaultLog = Object.freeze({ async write(entry) { process.stdout.write(JSON.stringify(entry) + '\n'); } });
@@ -105,6 +107,8 @@ export async function startCloudIngest({ config, openDatabase = createIngestData
     const connections = programsConfig ? new ProgramConnectionsService({ store: new TiDbProgramConnectionsStore(database) }) : null;
     if (connections) await connections.assertReady();
     const sourceHandler = connections ? createSourcePunchesApiHandler({ connections,
+      directoryService: deviceUserIdentityEnabled ? new DeviceIdentitiesService({
+        readStore: new TiDbDeviceIdentitiesReadStore(database, { deviceUserIdentityEnabled }), streamId: programsConfig.streamId }) : null,
       service: new SourcePunchesService({ readStore: new TiDbSourcePunchesReadStore(database, { deviceUserIdentityEnabled }),
         streamId: programsConfig.streamId }) }) : null;
     const portal = createCloudIngestPortalHandler({ config: config.portal, readStore: new TiDbIngestReadStore(database,
